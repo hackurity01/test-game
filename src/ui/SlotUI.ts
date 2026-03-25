@@ -1,12 +1,12 @@
-// 2슬롯 배치 UI 컴포넌트
+// 슬롯 배치 UI 컴포넌트 (Phase 2: 연계 태그 + 반응 스킬 UI 지원)
 
 import Phaser from 'phaser';
-import { CardInstance } from '../game/Card';
+import { CardInstance, getTagIcons } from '../game/Card';
 import { CARD_UI_WIDTH, CARD_UI_HEIGHT } from './CardUI';
 
 /** 슬롯 상태 */
 export interface SlotState {
-  slotIndex: number;     // 0 = 슬롯1, 1 = 슬롯2
+  slotIndex: number;
   card: CardInstance | null;
   isHighlighted: boolean;
 }
@@ -17,7 +17,7 @@ export interface SlotUIConfig {
   x: number;
   y: number;
   slotIndex: number;
-  label: string;         // "슬롯 1" or "슬롯 2"
+  label: string;
   onDrop?: (slotIndex: number, card: CardInstance) => void;
   onRemove?: (slotIndex: number) => void;
 }
@@ -27,11 +27,17 @@ export class SlotUI {
   private scene: Phaser.Scene;
   private container: Phaser.GameObjects.Container;
   private background: Phaser.GameObjects.Rectangle;
+  /** 반응 스킬용 점선 테두리 오버레이 (Graphics로 그림) */
+  private reactiveBorder: Phaser.GameObjects.Graphics;
   private labelText: Phaser.GameObjects.Text;
   private cardNameText: Phaser.GameObjects.Text;
   private cardCostText: Phaser.GameObjects.Text;
-  private slashEffect: Phaser.GameObjects.Text; // 스킵 피드백
-  private hintText: Phaser.GameObjects.Text;    // 빈 슬롯 힌트
+  private slashEffect: Phaser.GameObjects.Text;
+  private hintText: Phaser.GameObjects.Text;
+  /** 카드 태그 아이콘 표시 텍스트 (Phase 2-1) */
+  private tagText: Phaser.GameObjects.Text;
+  /** 연계 보너스 힌트 텍스트 (슬롯 상단) */
+  private chainHintText: Phaser.GameObjects.Text;
 
   private state: SlotState;
   private onDrop?: (slotIndex: number, card: CardInstance) => void;
@@ -57,6 +63,10 @@ export class SlotUI {
     this.background = this.scene.add.rectangle(0, 0, CARD_UI_WIDTH + 10, CARD_UI_HEIGHT + 10, 0x222244)
       .setStrokeStyle(2, 0x4444aa);
 
+    // 반응 스킬용 점선 테두리 (기본 숨김)
+    this.reactiveBorder = this.scene.add.graphics();
+    this.reactiveBorder.setVisible(false);
+
     // 슬롯 라벨
     this.labelText = this.scene.add.text(0, -CARD_UI_HEIGHT / 2 - 18, config.label, {
       fontSize: '13px',
@@ -76,11 +86,28 @@ export class SlotUI {
     }).setOrigin(0.5, 0.5);
 
     // 카드 비용 표시
-    this.cardCostText = this.scene.add.text(0, 15, '', {
+    this.cardCostText = this.scene.add.text(0, 8, '', {
       fontSize: '11px',
       color: '#ffcc00',
       fontFamily: 'Arial',
     }).setOrigin(0.5, 0.5);
+
+    // 태그 아이콘 텍스트 (카드 하단, Phase 2-1)
+    this.tagText = this.scene.add.text(0, CARD_UI_HEIGHT / 2 - 8, '', {
+      fontSize: '10px',
+      color: '#aaaaff',
+      fontFamily: 'Arial',
+      align: 'center',
+    }).setOrigin(0.5, 1);
+
+    // 연계 보너스 힌트 텍스트 (슬롯 위쪽, Phase 2-1)
+    this.chainHintText = this.scene.add.text(0, -CARD_UI_HEIGHT / 2 - 32, '', {
+      fontSize: '10px',
+      color: '#ffaa00',
+      fontFamily: 'Arial',
+      fontStyle: 'bold',
+      align: 'center',
+    }).setOrigin(0.5, 1);
 
     // 스킵 효과 텍스트
     this.slashEffect = this.scene.add.text(0, 0, '기 부족!', {
@@ -90,7 +117,7 @@ export class SlotUI {
       fontStyle: 'bold',
     }).setOrigin(0.5, 0.5).setVisible(false);
 
-    // 빈 슬롯 힌트 텍스트 (class property로 관리해 hide/show 제어)
+    // 빈 슬롯 힌트 텍스트
     this.hintText = this.scene.add.text(0, 0, '카드를\n클릭하여\n배치', {
       fontSize: '11px',
       color: '#444466',
@@ -100,9 +127,12 @@ export class SlotUI {
 
     this.container.add([
       this.background,
+      this.reactiveBorder,
       this.labelText,
+      this.chainHintText,
       this.cardNameText,
       this.cardCostText,
+      this.tagText,
       this.slashEffect,
       this.hintText,
     ]);
@@ -126,14 +156,72 @@ export class SlotUI {
     });
   }
 
+  /**
+   * 점선 테두리 그리기 (반응 스킬용)
+   * Phaser Graphics로 직접 그림
+   */
+  private drawDashedBorder(): void {
+    this.reactiveBorder.clear();
+    const w = CARD_UI_WIDTH + 10;
+    const h = CARD_UI_HEIGHT + 10;
+    const x = -w / 2;
+    const y = -h / 2;
+
+    this.reactiveBorder.lineStyle(2, 0xffaa00, 1);  // 주황색 점선
+
+    // 점선 패턴: 간격 6px, 선 4px
+    const dashLen = 6;
+    const gapLen = 4;
+
+    // 상단 선
+    let pos = x;
+    while (pos < x + w) {
+      const end = Math.min(pos + dashLen, x + w);
+      this.reactiveBorder.beginPath();
+      this.reactiveBorder.moveTo(pos, y);
+      this.reactiveBorder.lineTo(end, y);
+      this.reactiveBorder.strokePath();
+      pos += dashLen + gapLen;
+    }
+    // 하단 선
+    pos = x;
+    while (pos < x + w) {
+      const end = Math.min(pos + dashLen, x + w);
+      this.reactiveBorder.beginPath();
+      this.reactiveBorder.moveTo(pos, y + h);
+      this.reactiveBorder.lineTo(end, y + h);
+      this.reactiveBorder.strokePath();
+      pos += dashLen + gapLen;
+    }
+    // 좌측 선
+    pos = y;
+    while (pos < y + h) {
+      const end = Math.min(pos + dashLen, y + h);
+      this.reactiveBorder.beginPath();
+      this.reactiveBorder.moveTo(x, pos);
+      this.reactiveBorder.lineTo(x, end);
+      this.reactiveBorder.strokePath();
+      pos += dashLen + gapLen;
+    }
+    // 우측 선
+    pos = y;
+    while (pos < y + h) {
+      const end = Math.min(pos + dashLen, y + h);
+      this.reactiveBorder.beginPath();
+      this.reactiveBorder.moveTo(x + w, pos);
+      this.reactiveBorder.lineTo(x + w, end);
+      this.reactiveBorder.strokePath();
+      pos += dashLen + gapLen;
+    }
+  }
+
   /** 카드 배치 */
   placeCard(card: CardInstance): void {
-    // 진행 중인 모든 트윈 정리 (alpha, scale, y 포함)
+    // 진행 중인 모든 트윈 정리
     this.scene.tweens.killTweensOf(this.container);
     this.scene.tweens.killTweensOf(this.background);
     this.scene.tweens.killTweensOf(this.slashEffect);
 
-    // 트윈 kill 후 남은 중간 상태를 명시적으로 전부 리셋
     this.background.setAlpha(1);
     this.slashEffect.setVisible(false).setAlpha(1).setY(0);
     this.container.setAlpha(1).setScale(1);
@@ -144,8 +232,23 @@ export class SlotUI {
     this.hintText.setVisible(false);
     this.cardNameText.setText(card.data.name);
     this.cardCostText.setText(`기 비용: ${card.data.kiCost}`);
-    this.background.setFillStyle(0x334466);
-    this.background.setStrokeStyle(2, 0x6688cc);
+
+    // 반응 스킬 여부에 따라 배경색/테두리 변경
+    if (card.data.isReactive) {
+      // 반응 스킬: 어두운 주황색 배경 + 점선 테두리
+      this.background.setFillStyle(0x443322);
+      this.background.setStrokeStyle(1, 0x886644);  // 실선은 얇게
+      this.drawDashedBorder();
+      this.reactiveBorder.setVisible(true);
+    } else {
+      this.background.setFillStyle(0x334466);
+      this.background.setStrokeStyle(2, 0x6688cc);
+      this.reactiveBorder.setVisible(false);
+    }
+
+    // 태그 아이콘 표시 (Phase 2-1)
+    const tagIcons = getTagIcons(card.data.tags);
+    this.tagText.setText(tagIcons);
 
     // 배치 애니메이션
     this.scene.tweens.add({
@@ -162,18 +265,19 @@ export class SlotUI {
     const card = this.state.card;
     this.state.card = null;
 
-    // 진행 중인 트윈 모두 정리 후 시각 상태 완전 리셋
     this.scene.tweens.killTweensOf(this.container);
     this.scene.tweens.killTweensOf(this.background);
     this.scene.tweens.killTweensOf(this.slashEffect);
 
-    // alpha는 killTweensOf 후 직접 리셋 (Phaser 3.60에서 kill이 seek(0) 미보장)
     this.background.setAlpha(1);
     this.slashEffect.setVisible(false).setAlpha(1).setY(0);
     this.container.setAlpha(1).setScale(1);
 
     this.cardNameText.setText('');
     this.cardCostText.setText('');
+    this.tagText.setText('');          // 태그 초기화
+    this.chainHintText.setText('');    // 연계 힌트 초기화
+    this.reactiveBorder.setVisible(false);  // 점선 테두리 숨김
     this.hintText.setVisible(true);
     this.background.setFillStyle(0x222244);
     this.background.setStrokeStyle(2, 0x4444aa);
@@ -181,10 +285,18 @@ export class SlotUI {
     return card;
   }
 
+  /**
+   * 연계 보너스 힌트 텍스트 설정 (Phase 2-1)
+   * 이전 슬롯에서 연계 가능한 경우 "→ +2뎀" 등 표시
+   * @param hint 힌트 텍스트 (빈 문자열이면 숨김)
+   */
+  setChainHint(hint: string): void {
+    this.chainHintText.setText(hint);
+  }
+
   /** 기 부족 시 빨간 플래시 효과 */
   flashInsufficientKi(): Promise<void> {
     return new Promise((resolve) => {
-      // 이전 트윈 먼저 정리 + 상태 리셋
       this.scene.tweens.killTweensOf(this.background);
       this.scene.tweens.killTweensOf(this.slashEffect);
       this.background.setAlpha(1);
@@ -192,7 +304,6 @@ export class SlotUI {
 
       this.slashEffect.setVisible(true);
 
-      // 배경 알파 플래시 (fillColor 트윈 대신 알파 사용)
       this.scene.tweens.add({
         targets: this.background,
         alpha: 0.3,
@@ -204,8 +315,6 @@ export class SlotUI {
         },
       });
 
-      // "기 부족!" 텍스트 페이드아웃
-      // onStop도 등록해 tween이 killTweensOf로 중단될 때도 반드시 resolve()되도록 보장
       this.scene.tweens.add({
         targets: this.slashEffect,
         alpha: 0,
@@ -224,13 +333,17 @@ export class SlotUI {
     });
   }
 
-  /** 실행 중 하이라이트 (슬롯 1 실행 중 강조) */
+  /** 실행 중 하이라이트 */
   setHighlight(highlight: boolean): void {
     this.state.isHighlighted = highlight;
     if (highlight) {
       this.background.setStrokeStyle(3, 0xffff00);
     } else {
-      this.background.setStrokeStyle(2, this.state.card ? 0x6688cc : 0x4444aa);
+      if (this.state.card?.data.isReactive) {
+        this.background.setStrokeStyle(1, 0x886644);
+      } else {
+        this.background.setStrokeStyle(2, this.state.card ? 0x6688cc : 0x4444aa);
+      }
     }
   }
 
@@ -278,7 +391,6 @@ export class SlotUI {
 
   /** 제거 */
   destroy(): void {
-    // 진행 중인 트윈을 먼저 kill해 onStop/onComplete 콜백이 destroy된 오브젝트를 접근하지 않도록
     this.scene.tweens.killTweensOf(this.container);
     this.scene.tweens.killTweensOf(this.background);
     this.scene.tweens.killTweensOf(this.slashEffect);
