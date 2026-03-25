@@ -26,6 +26,8 @@ const LAYOUT = {
   ENEMY_SKILLS_LABEL_Y: 120,
   ENEMY_SKILLS_Y: 150,
   ENEMY_SLOTS_Y: 200,
+  /** 텔레그래프 텍스트 Y 위치 (슬롯 아래) */
+  ENEMY_TELEGRAPH_Y: 228,
 
   BATTLE_SECTION_TOP: 240,
   BATTLE_SECTION_BOTTOM: 460,
@@ -81,6 +83,9 @@ export class BattleScene extends Phaser.Scene {
   private executeBtn!: Phaser.GameObjects.Text;
   private executeBtnBg!: Phaser.GameObjects.Rectangle;
 
+  /** 적 슬롯별 텔레그래프 텍스트 오브젝트 배열 */
+  private enemyTelegraphTexts: Phaser.GameObjects.Text[] = [];
+
   // HP 바
   private playerHpBar!: Phaser.GameObjects.Rectangle;
   private enemyHpBar!: Phaser.GameObjects.Rectangle;
@@ -105,6 +110,7 @@ export class BattleScene extends Phaser.Scene {
     // 새 라운드 시작 전에 반드시 초기화해야 한다.
     this.playerSlots = [];
     this.enemySlotContainers = [];
+    this.enemyTelegraphTexts = [];
     this.handCards = [];
     this.battleLog = [];
     this.selectedCard = null;
@@ -142,6 +148,8 @@ export class BattleScene extends Phaser.Scene {
 
     // 전투 시작
     this.enemy.generateIntent();
+    // 인텐트 생성 직후 텔레그래프 표시 (플레이어가 카드 배치 전에 확인 가능)
+    this.updateTelegraphTexts();
     this.startDrawPhase();
   }
 
@@ -232,6 +240,16 @@ export class BattleScene extends Phaser.Scene {
 
       container.add([bg, label, actionText]);
       this.enemySlotContainers.push(container);
+
+      // 텔레그래프 텍스트: 슬롯 아래에 노란색 소문자로 표시
+      const telegraph = this.add.text(SLOT_X_POSITIONS[i], LAYOUT.ENEMY_TELEGRAPH_Y, '', {
+        fontSize: '10px',
+        color: '#ffff00',
+        fontFamily: 'Arial',
+        fontStyle: 'italic',
+        align: 'center',
+      }).setOrigin(0.5, 0);
+      this.enemyTelegraphTexts.push(telegraph);
     }
 
     // updateHpDisplays는 모든 UI 생성 후 한 번만 호출 (playerHpText가 아직 없음)
@@ -468,6 +486,9 @@ export class BattleScene extends Phaser.Scene {
     this.enemy.generateIntent();
     this.hideAllEnemySlots();
 
+    // 다음 턴 텔레그래프 업데이트 (새 인텐트 기반)
+    this.updateTelegraphTexts();
+
     this.checkBattleResult();
   }
 
@@ -488,7 +509,19 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
-  /** 슬롯 N 페이즈 실행 - 대결 매트릭스 기반 */
+  // =================== 슬롯 우선순위 시스템 ===================
+
+  /**
+   * 슬롯 N 페이즈 실행 - 우선순위(기 소모량) 기반 선공/후공 판정
+   *
+   * 우선순위 규칙:
+   * 1. 기 소모량이 더 큰 행동이 선공
+   * 2. 동률: 동시 발동 (양쪽 효과 모두 실행, 상쇄 없음)
+   *
+   * 순간이동(회피) 상호작용:
+   * - 선공이 순간이동이면 → 후공의 공격이 빗나감 (회피 성공)
+   * - 선공이 공격이면 → 후공의 순간이동은 불가 (이미 피격)
+   */
   private async executeSlotPhase(slotIndex: number): Promise<void> {
     const playerSlot = this.playerSlots[slotIndex];
     const playerCard = playerSlot.getCard();
@@ -502,10 +535,26 @@ export class BattleScene extends Phaser.Scene {
     this.gameState.player.setBlocking(false);
     this.gameState.player.setDodging(false);
 
-    // ── 플레이어 카드 유효성 체크 및 행동 분류 ──
+    // ── 플레이어 카드 기 비용 파악 (우선순위 계산용) ──
+    const playerKiCost = playerCard ? playerCard.data.kiCost : 0;
+    const enemyKiCost = enemyAction.kiCost;
+
+    // ── 우선순위 판정: 기 소모량이 많은 쪽이 선공 ──
+    // go = 'player_first' | 'enemy_first' | 'simultaneous'
+    let priority: 'player_first' | 'enemy_first' | 'simultaneous';
+    if (playerKiCost > enemyKiCost) {
+      priority = 'player_first';
+    } else if (enemyKiCost > playerKiCost) {
+      priority = 'enemy_first';
+    } else {
+      priority = 'simultaneous';
+    }
+
+    // ── 플레이어 카드 유효성 체크 ──
     type PlayerBattleType = 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'none';
     let playerBattleType: PlayerBattleType = 'none';
     let playerCardExecuted = false;
+    let playerCardValid = false;
 
     if (playerCard) {
       if (playerCard.usesLeft !== null && playerCard.usesLeft <= 0) {
@@ -515,195 +564,289 @@ export class BattleScene extends Phaser.Scene {
         this.addLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효`);
         await playerSlot.flashInsufficientKi();
       } else {
-        this.gameState.player.spendKi(playerCard.data.kiCost);
-        if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
-        this.updateKiGauges();
-        playerCardExecuted = true;
-
+        playerCardValid = true;
         const effectType = playerCard.data.effect.type;
-        if (effectType === 'ki_gain')                        playerBattleType = 'ki_gather';
-        else if (effectType === 'damage')                    playerBattleType = 'attack';
+        if (effectType === 'ki_gain')                              playerBattleType = 'ki_gather';
+        else if (effectType === 'damage')                          playerBattleType = 'attack';
         else if (effectType === 'block' || effectType === 'dodge') playerBattleType = 'defend';
-        else if (effectType === 'steal_ki')                  playerBattleType = 'steal';
-        else if (effectType === 'mark')                      playerBattleType = 'mark';
-        // swap_next, passive → 'none' (배치 불가 처리됨)
+        else if (effectType === 'steal_ki')                        playerBattleType = 'steal';
+        else if (effectType === 'mark')                            playerBattleType = 'mark';
       }
     }
 
     // ── 적 행동 분류 ──
     type EnemyBattleType = 'ki_gather' | 'attack' | 'defend';
     let enemyBattleType: EnemyBattleType;
-    if (enemyAction.type === 'ki_gather')     enemyBattleType = 'ki_gather';
-    else if (enemyAction.type === 'defend')   enemyBattleType = 'defend';
-    else                                      enemyBattleType = 'attack';
+    if (enemyAction.type === 'ki_gather')   enemyBattleType = 'ki_gather';
+    else if (enemyAction.type === 'defend') enemyBattleType = 'defend';
+    else                                    enemyBattleType = 'attack';
 
-    // ── 적 행동 실행 (기 소모 + 기모으기 효과 적용) ──
-    const enemyResult = this.enemy.executeAction(enemyAction);
-    if (enemyResult.skipped) {
-      this.addLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`);
-      this.flashEnemySlotBg(slotIndex, 0x880000);
-    } else if (enemyResult.kiGained > 0) {
-      this.addLog(`⚡ 적 기모으기: +${enemyResult.kiGained}`);
-    }
-    this.updateKiGauges();
+    // ── 순간이동(dodge) 회피 가능 여부 판정 ──
+    // 선공이 순간이동: 후공 공격 회피 가능
+    // 후공이 순간이동: 선공 공격 이후이므로 회피 불가
+    const playerIsDodge = playerBattleType === 'defend' && playerCard?.data.effect.type === 'dodge';
+    const enemyIsAttack = enemyBattleType === 'attack';
 
-    const enemyEffective = !enemyResult.skipped;
-
-    // ── 피해 매트릭스 판정 ──
-
-    // 플레이어가 적을 공격할 수 있는가?
-    // attack vs ki_gather/mark/steal(비공격) → 명중
-    // attack vs attack → 무승부
-    // attack vs defend → 막힘
-    const playerDealsFullDamage = playerCardExecuted && playerBattleType === 'attack' &&
-      (!enemyEffective || (enemyBattleType !== 'attack' && enemyBattleType !== 'defend'));
-
-    // 적이 플레이어에게 데미지를 줄 수 있는가?
-    // player ki_gather/none/mark → 무방비
-    // player steal (if enemy attacks) → 강탈 실패 = 무방비
-    // player defend/dodge → 방어
-    // player attack vs enemy attack → 무승부 = 무방비 아님
-    const playerIsVulnerable =
-      playerBattleType === 'ki_gather' ||
-      playerBattleType === 'none' ||
-      playerBattleType === 'mark' ||
-      (playerBattleType === 'steal' && enemyBattleType === 'attack');
-
-    const enemyDealsFullDamage = enemyEffective && enemyBattleType === 'attack' && playerIsVulnerable;
-
-    // 강탈 성공 여부
-    const stealSucceeds = playerCardExecuted && playerBattleType === 'steal' &&
-      (!enemyEffective || enemyBattleType !== 'attack');
-
-    // ── 상호작용 로그 ──
-    if (playerCardExecuted && enemyEffective) {
-      if (playerBattleType === 'attack' && enemyBattleType === 'attack') {
-        this.addLog('⚡⚡ 서로 파가 충돌! 무승부 (0 데미지)');
-      } else if (playerBattleType === 'attack' && enemyBattleType === 'defend') {
-        this.addLog(`🛡️ 적이 막기로 [${playerCard!.data.name}]을 막았다!`);
-      } else if (playerBattleType === 'defend' && enemyBattleType === 'attack') {
-        const isDodge = playerCard!.data.effect.type === 'dodge';
-        this.addLog(isDodge
-          ? `💨 순간이동으로 [${enemyAction.name}] 회피!`
-          : `🛡️ 막기로 [${enemyAction.name}] 상쇄!`
-        );
+    // 플레이어 순간이동이 회피 성공 가능한지 여부
+    let playerDodgeSuccess = false;
+    if (playerCardValid && playerIsDodge && enemyIsAttack) {
+      if (priority === 'player_first') {
+        // 선공(플레이어)이 순간이동 → 후공(적) 공격 빗나감
+        playerDodgeSuccess = true;
+      } else if (priority === 'simultaneous') {
+        // 동시 발동: 순간이동도 효과 있음 (회피)
+        playerDodgeSuccess = true;
       }
+      // priority === 'enemy_first': 적 공격이 먼저이므로 회피 불가
     }
 
-    // ── 플레이어 기모으기 효과 ──
-    if (playerCardExecuted && playerBattleType === 'ki_gather') {
-      const gained = this.gameState.player.gainKi(playerCard!.data.effect.value);
-      this.addLog(`✨ [${playerCard!.data.name}]: 기 +${gained}`);
-      await playerSlot.flashExecuted();
+    // 적 행동이 빗나가는 경우: 플레이어가 선공 순간이동으로 회피
+    const enemyAttackMissed = playerDodgeSuccess;
 
-      // 명상 패시브: ki_gather 성공/피격 여부에 따라 트리거
-      if (enemyDealsFullDamage) {
-        // 기모으기 중 피격 → 추가 피해
-        const results = this.skillSystem.trigger({
-          type: 'ki_gather_while_attacked',
-          context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
-        });
-        for (const r of results) {
-          if (r.message) this.addLog(r.message);
-        }
-      } else {
-        // 기모으기 성공 → 추가 기
-        const results = this.skillSystem.trigger({
-          type: 'ki_gather_success',
-          context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
-        });
-        for (const r of results) {
-          if (r.message) this.addLog(r.message);
-          if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
-        }
-        this.updateKiGauges();
-      }
+    // ── 기 소모 및 행동 실행 (우선순위 순서) ──
+    // 실제 효과 적용은 우선순위 따라 순차/동시 처리
+
+    if (priority === 'player_first') {
+      await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType, enemyAttackMissed);
+      await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, playerBattleType, playerCardValid, playerCardExecuted || playerCardValid, enemyAttackMissed);
+    } else if (priority === 'enemy_first') {
+      // 적 선공 → 플레이어 후공 순간이동 불가(이미 피격)
+      const forceMissPlayer = enemyIsAttack && playerIsDodge && priority === 'enemy_first';
+      await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, playerBattleType, playerCardValid, false, false);
+      await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType, false, forceMissPlayer);
+    } else {
+      // 동시 발동: 양쪽 효과 모두 실행
+      await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType, playerDodgeSuccess);
     }
 
-    // ── 플레이어 막기/회피 효과 ──
-    if (playerCardExecuted && playerBattleType === 'defend') {
-      const isDodge = playerCard!.data.effect.type === 'dodge';
-      if (isDodge) {
-        this.gameState.player.setDodging(true);
-        this.addLog(`💨 [${playerCard!.data.name}]: 회피 준비!`);
-      } else {
-        this.gameState.player.setBlocking(true);
-        this.addLog(`🛡️ [${playerCard!.data.name}]: 막기 준비!`);
-      }
-      await playerSlot.flashExecuted();
-
-      // 막기 성공 시 패링 패시브 트리거
-      if (!isDodge && enemyEffective && enemyBattleType === 'attack') {
-        const results = this.skillSystem.trigger({
-          type: 'block_success',
-          context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
-        });
-        for (const r of results) {
-          if (r.message) this.addLog(r.message);
-          if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
-        }
-        this.updateKiGauges();
-      }
-    }
-
-    // ── 표식 효과 ──
-    if (playerCardExecuted && playerBattleType === 'mark') {
-      const markVal = playerCard!.data.effect.value;
-      this.enemy.addMark(markVal);
-      this.addLog(`🎯 [${playerCard!.data.name}]: 적에게 표식 +${markVal} (누적: ${this.enemy.mark})`);
-      await playerSlot.flashExecuted();
-    }
-
-    // ── 강탈 효과 ──
-    if (stealSucceeds) {
-      const stolen = this.enemy.stealKi(playerCard!.data.effect.value);
-      if (stolen > 0) {
-        this.gameState.player.gainKi(stolen);
-        this.addLog(`💰 [${playerCard!.data.name}]: 적에게서 기 ${stolen} 강탈!`);
-      } else {
-        this.addLog(`💰 [${playerCard!.data.name}]: 강탈했지만 적의 기가 없었다.`);
-      }
-      this.updateKiGauges();
-      await playerSlot.flashExecuted();
-    } else if (playerCardExecuted && playerBattleType === 'steal' && !stealSucceeds) {
-      this.addLog(`❌ [${playerCard!.data.name}]: 공격받아 강탈 실패!`);
-    }
-
-    // ── 플레이어 공격 효과 ──
-    if (playerDealsFullDamage) {
-      await this.applyAttackEffect(playerCard!, playerSlot);
-    }
-
-    // ── 적 공격 효과 ──
-    if (enemyDealsFullDamage && enemyResult.damage > 0) {
-      let finalDamage = enemyResult.damage;
-
-      // 명상 패시브: 기모으기 중 피격 시 피해 +1
-      if (playerBattleType === 'ki_gather') {
-        const results = this.skillSystem.trigger({
-          type: 'ki_gather_while_attacked',
-          context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
-        });
-        for (const r of results) {
-          if (r.extraDamage) finalDamage += r.extraDamage;
-        }
-      }
-
-      const actualDmg = this.gameState.player.takeDamage(finalDamage);
-      this.gameState.recordDamageTaken(actualDmg);
-      this.addLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해!`);
-      if (actualDmg > 0) await this.showDamageEffect(true, actualDmg);
-    } else if (!playerCardExecuted && enemyEffective && enemyBattleType === 'attack' && enemyResult.damage > 0) {
-      // 플레이어 카드 없음 + 적 공격
-      const actualDmg = this.gameState.player.takeDamage(enemyResult.damage);
-      this.gameState.recordDamageTaken(actualDmg);
-      this.addLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해!`);
-      if (actualDmg > 0) await this.showDamageEffect(true, actualDmg);
-    }
+    playerCardExecuted = playerCardValid;
 
     playerSlot.setHighlight(false);
     this.updateAllUI();
     await this.wait(300);
+  }
+
+  /**
+   * 플레이어 행동 실행
+   * @param dodgeForceFail - 적 선공 공격 이후 순간이동 강제 실패
+   */
+  private async executePlayerAction(
+    playerCard: CardInstance | null,
+    playerCardValid: boolean,
+    playerBattleType: 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'none',
+    playerSlot: SlotUI,
+    slotIndex: number,
+    enemyAction: EnemyAction,
+    enemyBattleType: 'ki_gather' | 'attack' | 'defend',
+    enemyAttackMissed: boolean,
+    dodgeForceFail: boolean = false
+  ): Promise<void> {
+    if (!playerCard || !playerCardValid) return;
+
+    // 기 소모
+    this.gameState.player.spendKi(playerCard.data.kiCost);
+    if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+    this.updateKiGauges();
+
+    // 적 행동도 이 시점에 실행 (기 소모 포함) - 아직 executeEnemyAction을 부르지 않은 경우
+    // (실제로는 executeEnemyAction이 별도 호출됨)
+
+    switch (playerBattleType) {
+      case 'ki_gather': {
+        const gained = this.gameState.player.gainKi(playerCard.data.effect.value);
+        this.addLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
+        await playerSlot.flashExecuted();
+
+        // 명상 패시브: ki_gather 성공/피격 여부에 따라 트리거
+        const enemyEffective = enemyBattleType === 'attack' && !enemyAttackMissed;
+        if (enemyEffective) {
+          const results = this.skillSystem.trigger({
+            type: 'ki_gather_while_attacked',
+            context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
+          });
+          for (const r of results) {
+            if (r.message) this.addLog(r.message);
+          }
+        } else {
+          const results = this.skillSystem.trigger({
+            type: 'ki_gather_success',
+            context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
+          });
+          for (const r of results) {
+            if (r.message) this.addLog(r.message);
+            if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
+          }
+          this.updateKiGauges();
+        }
+        break;
+      }
+
+      case 'defend': {
+        const isDodge = playerCard.data.effect.type === 'dodge';
+        if (dodgeForceFail && isDodge) {
+          // 적 선공 공격 이후 순간이동 → 이미 피격, 효과 없음
+          this.addLog(`❌ [${playerCard.data.name}]: 이미 공격받아 순간이동 불가!`);
+        } else if (isDodge) {
+          this.gameState.player.setDodging(true);
+          if (enemyAttackMissed) {
+            this.addLog(`💨 [${playerCard.data.name}]: 선공 순간이동 → 적 공격 회피!`);
+          } else {
+            this.addLog(`💨 [${playerCard.data.name}]: 회피 준비!`);
+          }
+        } else {
+          this.gameState.player.setBlocking(true);
+          this.addLog(`🛡️ [${playerCard.data.name}]: 막기 준비!`);
+        }
+        await playerSlot.flashExecuted();
+
+        // 막기 성공 시 패링 패시브
+        if (!isDodge && enemyBattleType === 'attack' && !enemyAttackMissed) {
+          const results = this.skillSystem.trigger({
+            type: 'block_success',
+            context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
+          });
+          for (const r of results) {
+            if (r.message) this.addLog(r.message);
+            if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
+          }
+          this.updateKiGauges();
+        }
+        break;
+      }
+
+      case 'mark': {
+        const markVal = playerCard.data.effect.value;
+        this.enemy.addMark(markVal);
+        this.addLog(`🎯 [${playerCard.data.name}]: 적에게 표식 +${markVal} (누적: ${this.enemy.mark})`);
+        await playerSlot.flashExecuted();
+        break;
+      }
+
+      case 'steal': {
+        // 강탈: 적이 공격 중이면 실패
+        const enemyAttacking = enemyBattleType === 'attack' && !enemyAttackMissed;
+        if (enemyAttacking) {
+          this.addLog(`❌ [${playerCard.data.name}]: 공격받아 강탈 실패!`);
+        } else {
+          const stolen = this.enemy.stealKi(playerCard.data.effect.value);
+          if (stolen > 0) {
+            this.gameState.player.gainKi(stolen);
+            this.addLog(`💰 [${playerCard.data.name}]: 적에게서 기 ${stolen} 강탈!`);
+          } else {
+            this.addLog(`💰 [${playerCard.data.name}]: 강탈했지만 적의 기가 없었다.`);
+          }
+          this.updateKiGauges();
+        }
+        await playerSlot.flashExecuted();
+        break;
+      }
+
+      case 'attack': {
+        // 적이 막기 상태이면 데미지 0
+        const blockedByEnemy = enemyBattleType === 'defend';
+        if (blockedByEnemy) {
+          this.addLog(`🛡️ 적이 막기로 [${playerCard.data.name}]을 막았다!`);
+          await playerSlot.flashExecuted();
+        } else {
+          await this.applyAttackEffect(playerCard, playerSlot);
+        }
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+
+  /**
+   * 적 행동 실행
+   * @param alreadyExecuted - 이미 기 소모가 실행된 경우 (현재 미사용, 구조상 명시)
+   */
+  private async executeEnemyAction(
+    enemyAction: EnemyAction,
+    enemyBattleType: 'ki_gather' | 'attack' | 'defend',
+    slotIndex: number,
+    playerBattleType: 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'none',
+    playerCardValid: boolean,
+    _alreadyExecuted: boolean,
+    enemyAttackMissed: boolean
+  ): Promise<void> {
+    // 적 행동 실행 (기 소모 + 기모으기 적용)
+    const enemyResult = this.enemy.executeAction(enemyAction);
+    if (enemyResult.skipped) {
+      this.addLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`);
+      this.flashEnemySlotBg(slotIndex, 0x880000);
+      return;
+    }
+    if (enemyResult.kiGained > 0) {
+      this.addLog(`⚡ 적 기모으기: +${enemyResult.kiGained}`);
+    }
+    this.updateKiGauges();
+
+    // 공격 행동이고 빗나가지 않은 경우 플레이어에게 피해
+    if (enemyBattleType === 'attack' && !enemyAttackMissed && enemyResult.damage > 0) {
+      // 플레이어 방어 상태 확인
+      const playerBlocking = this.gameState.player.isBlocking;
+      const playerDodging  = this.gameState.player.isDodging;
+
+      if (playerDodging) {
+        this.addLog(`💨 순간이동으로 [${enemyAction.name}] 회피!`);
+      } else if (playerBlocking) {
+        this.addLog(`🛡️ 막기로 [${enemyAction.name}] 상쇄!`);
+      } else {
+        // 실제 피해
+        let finalDamage = enemyResult.damage;
+
+        // 명상 패시브: 기모으기 중 피격 시 피해 +1
+        if (playerBattleType === 'ki_gather' && playerCardValid) {
+          const results = this.skillSystem.trigger({
+            type: 'ki_gather_while_attacked',
+            context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
+          });
+          for (const r of results) {
+            if (r.extraDamage) finalDamage += r.extraDamage;
+          }
+        }
+
+        const actualDmg = this.gameState.player.takeDamage(finalDamage);
+        this.gameState.recordDamageTaken(actualDmg);
+        this.addLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해!`);
+        if (actualDmg > 0) await this.showDamageEffect(true, actualDmg);
+      }
+    } else if (enemyBattleType === 'attack' && enemyAttackMissed) {
+      this.addLog(`💨 [${enemyAction.name}] 빗나감! (순간이동 회피)`);
+    }
+  }
+
+  /**
+   * 동시 발동 처리 (기 소모량 동률)
+   * 양쪽 효과를 모두 처리, 상쇄 없음
+   */
+  private async executeSimultaneous(
+    playerCard: CardInstance | null,
+    playerCardValid: boolean,
+    playerBattleType: 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'none',
+    playerSlot: SlotUI,
+    slotIndex: number,
+    enemyAction: EnemyAction,
+    enemyBattleType: 'ki_gather' | 'attack' | 'defend',
+    playerDodgeSuccess: boolean
+  ): Promise<void> {
+    this.addLog('⚡ 동시 발동!');
+
+    // 플레이어 행동 실행 (dodge 성공 가능)
+    await this.executePlayerAction(
+      playerCard, playerCardValid, playerBattleType,
+      playerSlot, slotIndex, enemyAction, enemyBattleType,
+      playerDodgeSuccess  // 동시 발동에서 순간이동은 회피 성공
+    );
+
+    // 적 행동 실행
+    await this.executeEnemyAction(
+      enemyAction, enemyBattleType, slotIndex,
+      playerBattleType, playerCardValid, false,
+      playerDodgeSuccess  // 순간이동이 성공했으면 적 공격 빗나감
+    );
   }
 
   /** 공격 카드 효과 적용 (표식 멀티플라이어 포함) */
@@ -829,6 +972,21 @@ export class BattleScene extends Phaser.Scene {
       const canSelect = cardUI.card.usesLeft === null || cardUI.card.usesLeft > 0;
       cardUI.setEnabled(canSelect);
     });
+  }
+
+  /**
+   * 텔레그래프 텍스트 업데이트
+   * 현재 인텐트(intent.telegraphs)를 기반으로 각 슬롯 아래에 표시
+   * null이면 빈 문자열로 숨김
+   */
+  private updateTelegraphTexts(): void {
+    const telegraphs = this.enemy.intent.telegraphs;
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const text = this.enemyTelegraphTexts[i];
+      if (!text) continue;
+      const msg = telegraphs[i] ?? '';
+      text.setText(msg);
+    }
   }
 
   /** 적 슬롯 공개 */
