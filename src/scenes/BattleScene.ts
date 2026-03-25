@@ -1,8 +1,9 @@
-// 핵심 전투 씬 - 3슬롯 배치 전투 시스템 (Phase 2: 연계 태그 + 반응 스킬 + 눈치보기 강화)
+// 핵심 전투 씬 - 3슬롯 배치 전투 시스템
+// Phase 3: 피콜로 패시브, 재생집중 취약, 레드리본 대령, 패시브/적 정보 UI
 
 import Phaser from 'phaser';
 import { GameState } from '../game/GameState';
-import { Enemy, EnemyAction } from '../game/Enemy';
+import { Enemy, EnemyAction, ENEMY_PASSIVES } from '../game/Enemy';
 import { CardInstance, CardTag } from '../game/Card';
 import { SkillSystem } from '../game/SkillSystem';
 import { CardUI } from '../ui/CardUI';
@@ -26,7 +27,6 @@ const LAYOUT = {
   ENEMY_SKILLS_LABEL_Y: 120,
   ENEMY_SKILLS_Y: 150,
   ENEMY_SLOTS_Y: 200,
-  /** 텔레그래프 텍스트 Y 위치 (슬롯 아래) */
   ENEMY_TELEGRAPH_Y: 228,
 
   BATTLE_SECTION_TOP: 240,
@@ -49,6 +49,10 @@ const LAYOUT = {
   LOG_Y: 860,
   EXECUTE_BTN_Y: 860,
 
+  // Phase 3-4: 패시브 패널 (좌하단)
+  PASSIVE_PANEL_X: 20,
+  PASSIVE_PANEL_Y: 840,
+
   CENTER_X: 800,
   SLOT1_X: 500,
   SLOT2_X: 800,
@@ -65,15 +69,13 @@ const SLOT_X_POSITIONS = [LAYOUT.SLOT1_X, LAYOUT.SLOT2_X, LAYOUT.SLOT3_X];
 // Phase 2-1: 연계 태그 시스템 타입
 // ──────────────────────────────────────────
 
-/** 연계 보너스 결과 */
 interface ChainBonus {
-  damageBonus: number;       // 추가 피해
-  kiCostReduction: number;   // 기 소모 감소
-  bypassDefend: boolean;     // 적 막기 관통
-  markMultiplier: number;    // 표식 데미지 배수 (1 = 기본, 2 = 2배)
+  damageBonus: number;
+  kiCostReduction: number;
+  bypassDefend: boolean;
+  markMultiplier: number;
 }
 
-/** 기본 연계 보너스 (아무 효과 없음) */
 const NO_CHAIN: ChainBonus = {
   damageBonus: 0,
   kiCostReduction: 0,
@@ -81,49 +83,21 @@ const NO_CHAIN: ChainBonus = {
   markMultiplier: 1,
 };
 
-/**
- * 이전 슬롯 태그와 현재 슬롯 태그를 비교하여 연계 보너스 계산 (Phase 2-1)
- *
- * 연계 규칙:
- * - CHARGE → ENERGY: 피해 +2
- * - ENERGY → ENERGY: 피해 +1 추가 (연속파)
- * - MARK → 공격스킬: 표식 효과 ×2 (markMultiplier = 2)
- * - MOVE → 공격스킬: 막기 관통 (bypassDefend = true)
- * - DEFEND → ENERGY: 기 소모 -1 (최소 1)
- */
 function calcChainBonus(prevTags: CardTag[], currentTags: CardTag[], currentEffectType: string): ChainBonus {
   const bonus: ChainBonus = { ...NO_CHAIN };
   const isAttack = currentEffectType === 'damage' || currentEffectType === 'ambush';
 
   for (const prevTag of prevTags) {
-    // CHARGE → ENERGY: +2뎀
-    if (prevTag === 'CHARGE' && currentTags.includes('ENERGY')) {
-      bonus.damageBonus += 2;
-    }
-    // ENERGY → ENERGY: +1뎀 (연속파)
-    if (prevTag === 'ENERGY' && currentTags.includes('ENERGY')) {
-      bonus.damageBonus += 1;
-    }
-    // MARK → 공격: 표식 2배
-    if (prevTag === 'MARK' && isAttack) {
-      bonus.markMultiplier = 2;
-    }
-    // MOVE → 공격: 막기 관통
-    if (prevTag === 'MOVE' && isAttack) {
-      bonus.bypassDefend = true;
-    }
-    // DEFEND → ENERGY: 기 소모 -1
-    if (prevTag === 'DEFEND' && currentTags.includes('ENERGY')) {
-      bonus.kiCostReduction += 1;
-    }
+    if (prevTag === 'CHARGE' && currentTags.includes('ENERGY')) bonus.damageBonus += 2;
+    if (prevTag === 'ENERGY' && currentTags.includes('ENERGY')) bonus.damageBonus += 1;
+    if (prevTag === 'MARK' && isAttack) bonus.markMultiplier = 2;
+    if (prevTag === 'MOVE' && isAttack) bonus.bypassDefend = true;
+    if (prevTag === 'DEFEND' && currentTags.includes('ENERGY')) bonus.kiCostReduction += 1;
   }
 
   return bonus;
 }
 
-/**
- * 연계 보너스 힌트 텍스트 생성 (UI 표시용)
- */
 function buildChainHintText(bonus: ChainBonus): string {
   const parts: string[] = [];
   if (bonus.damageBonus > 0) parts.push(`+${bonus.damageBonus}뎀`);
@@ -160,7 +134,7 @@ export class BattleScene extends Phaser.Scene {
   private executeBtn!: Phaser.GameObjects.Text;
   private executeBtnBg!: Phaser.GameObjects.Rectangle;
 
-  /** 적 슬롯별 텔레그래프 텍스트 오브젝트 배열 */
+  /** 적 슬롯별 텔레그래프 텍스트 */
   private enemyTelegraphTexts: Phaser.GameObjects.Text[] = [];
 
   // HP 바
@@ -172,17 +146,27 @@ export class BattleScene extends Phaser.Scene {
   private selectedCard: CardInstance | null = null;
   private battleLog: string[] = [];
 
-  /**
-   * sense 스킬 효과 상태 (Phase 2-3)
-   * sense 배치 시 true → 슬롯 2개 제한 활성화
-   */
+  /** sense 스킬 효과 상태 */
   private senseActive: boolean = false;
 
-  /**
-   * ki_shield 연속 효과 상태 (Phase 2-2)
-   * ki_shield 성공 시 다음 슬롯 기소모 -1
-   */
+  /** ki_shield 연속 효과 상태 */
   private kiShieldNextSlotBonus: number = 0;
+
+  // ── Phase 3-1: 피콜로 재생 텍스트 ──
+  /** 피콜로 전투 중 "재생 1/턴" 표시 텍스트 */
+  private piccRegenText!: Phaser.GameObjects.Text;
+
+  // ── Phase 3-4: 플레이어 패시브 패널 ──
+  /** 패시브 패널 텍스트 오브젝트 목록 (패시브 발동 시 번쩍임용) */
+  private passivePanelTexts: Map<string, Phaser.GameObjects.Text> = new Map();
+  /** 패시브 패널 컨테이너 */
+  private passivePanelContainer!: Phaser.GameObjects.Container;
+
+  // ── Phase 3-4: 적 정보 팝업 ──
+  /** 적 정보 팝업 컨테이너 (null = 닫힘) */
+  private enemyInfoPopup: Phaser.GameObjects.Container | null = null;
+  /** 팝업 열림 여부 */
+  private enemyInfoOpen: boolean = false;
 
   constructor() {
     super({ key: 'BattleScene' });
@@ -202,6 +186,9 @@ export class BattleScene extends Phaser.Scene {
     this.phase = 'draw';
     this.senseActive = false;
     this.kiShieldNextSlotBonus = 0;
+    this.passivePanelTexts = new Map();
+    this.enemyInfoPopup = null;
+    this.enemyInfoOpen = false;
 
     // 배경
     this.add.rectangle(width / 2, height / 2, width, height, 0x0a0a1e);
@@ -220,12 +207,13 @@ export class BattleScene extends Phaser.Scene {
     }
 
     this.drawSectionDividers(width);
-
     this.createEnemyArea(width);
     this.createBattleArea(width);
     this.createPlayerArea(width);
     this.createSkillArea(width, height);
     this.createBottomArea(width, height);
+    this.createPassivePanel();       // Phase 3-4
+    this.createPiccoloRegenText();   // Phase 3-1
 
     this.updateHpDisplays();
     this.updateKiGauges();
@@ -266,6 +254,15 @@ export class BattleScene extends Phaser.Scene {
       fontSize: '22px', color: '#ff6666', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
 
+    // Phase 3-4: ℹ️ 버튼
+    const infoBtn = this.add.text(width / 2 + 120, LAYOUT.ENEMY_NAME_Y + 2, 'ℹ️', {
+      fontSize: '18px', fontFamily: 'Arial',
+    }).setOrigin(0, 0).setInteractive({ useHandCursor: true });
+
+    infoBtn.on('pointerdown', () => this.toggleEnemyInfoPopup());
+    infoBtn.on('pointerover', () => infoBtn.setStyle({ color: '#ffff88' }));
+    infoBtn.on('pointerout', () => infoBtn.setStyle({ color: '#ffffff' }));
+
     this.enemyHpText = this.add.text(width / 2, LAYOUT.ENEMY_HP_Y, '', {
       fontSize: '13px', color: '#ff8888', fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
@@ -290,10 +287,12 @@ export class BattleScene extends Phaser.Scene {
     const availableSkills = this.enemy.availableSkills;
     let skillX = 130;
     availableSkills.forEach(skill => {
-      const isAttack = skill.type === 'attack_s' || skill.type === 'attack_l' || skill.type === 'special';
-      const tagColor = isAttack ? 0x441111 : (skill.type === 'ki_gather' ? 0x112244 : 0x114411);
-      const tagBorderColor = isAttack ? 0xaa3333 : (skill.type === 'ki_gather' ? 0x3355aa : 0x33aa33);
-      const textColor = isAttack ? '#ff8888' : (skill.type === 'ki_gather' ? '#88aaff' : '#88ff88');
+      const isPierce = skill.type === 'attack_pierce';
+      const isAttack = skill.type === 'attack_s' || skill.type === 'attack_l' || skill.type === 'special' || isPierce;
+      const isCommand = skill.type === 'command';
+      const tagColor = isAttack ? 0x441111 : (skill.type === 'ki_gather' ? 0x112244 : (isCommand ? 0x442200 : 0x114411));
+      const tagBorderColor = isAttack ? 0xaa3333 : (skill.type === 'ki_gather' ? 0x3355aa : (isCommand ? 0xaa6600 : 0x33aa33));
+      const textColor = isAttack ? '#ff8888' : (skill.type === 'ki_gather' ? '#88aaff' : (isCommand ? '#ffaa44' : '#88ff88'));
 
       const tagWidth = skill.name.length * 9 + 16;
       this.add.rectangle(skillX + tagWidth / 2, LAYOUT.ENEMY_SKILLS_LABEL_Y + 6, tagWidth, 22, tagColor)
@@ -408,6 +407,184 @@ export class BattleScene extends Phaser.Scene {
     }).setOrigin(0, 1);
   }
 
+  /**
+   * Phase 3-1: 피콜로 "재생 1/턴" 항상 표시 텍스트 생성
+   * 보스 전투에서만 visible
+   */
+  private createPiccoloRegenText(): void {
+    const isBoss = this.enemy.type === 'boss';
+    // 피콜로 패시브 중 regenerate_passive가 있는지 확인
+    const hasRegen = isBoss && this.enemy.passives.includes('regenerate_passive');
+
+    this.piccRegenText = this.add.text(
+      LAYOUT.KI_GAUGE_X_RIGHT - 50,
+      LAYOUT.ENEMY_HP_Y + 20,
+      '재생 1/턴',
+      {
+        fontSize: '11px',
+        color: '#44ff88',
+        fontFamily: 'Arial',
+        fontStyle: 'italic',
+      }
+    ).setOrigin(0.5, 0);
+
+    this.piccRegenText.setVisible(hasRegen);
+  }
+
+  /**
+   * Phase 3-4: 플레이어 패시브 패널 생성 (화면 좌하단)
+   */
+  private createPassivePanel(): void {
+    this.passivePanelContainer = this.add.container(LAYOUT.PASSIVE_PANEL_X, LAYOUT.PASSIVE_PANEL_Y);
+
+    const passiveCards = this.gameState.deck.getAllCards().filter(c => c.data.isPassive);
+    if (passiveCards.length === 0) {
+      // 패시브 없으면 패널 숨김
+      this.passivePanelContainer.setVisible(false);
+      return;
+    }
+
+    // 배경
+    const panelWidth = Math.min(400, passiveCards.length * 120 + 20);
+    const bg = this.add.rectangle(panelWidth / 2, -10, panelWidth, 24, 0x111133, 0.7)
+      .setStrokeStyle(1, 0x333366);
+    this.passivePanelContainer.add(bg);
+
+    // 라벨
+    const label = this.add.text(6, -18, '패시브:', {
+      fontSize: '10px', color: '#6666aa', fontFamily: 'Arial',
+    }).setOrigin(0, 0.5);
+    this.passivePanelContainer.add(label);
+
+    // 패시브 아이콘 맵
+    const passiveIconMap: Record<string, string> = {
+      passive_parry: '🛡 패링',
+      passive_rapid: '⚡ 연속파',
+      passive_meditate: '🧘 명상',
+    };
+
+    let xOffset = 55;
+    passiveCards.forEach((card) => {
+      const iconText = passiveIconMap[card.data.id] ?? `✨ ${card.data.name}`;
+      const txt = this.add.text(xOffset, -18, iconText, {
+        fontSize: '11px',
+        color: '#aaaaff',
+        fontFamily: 'Arial',
+        fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+
+      this.passivePanelContainer.add(txt);
+      this.passivePanelTexts.set(card.data.id, txt);
+      xOffset += txt.width + 14;
+
+      // 구분자 (마지막 항목 제외)
+      if (xOffset < panelWidth) {
+        const sep = this.add.text(xOffset - 6, -18, '|', {
+          fontSize: '11px', color: '#444466', fontFamily: 'Arial',
+        }).setOrigin(0.5, 0.5);
+        this.passivePanelContainer.add(sep);
+      }
+    });
+  }
+
+  /**
+   * Phase 3-4: 패시브 발동 시 노란색 번쩍임
+   */
+  private flashPassiveText(passiveId: string): void {
+    const txt = this.passivePanelTexts.get(passiveId);
+    if (!txt) return;
+
+    txt.setColor('#ffff00');
+    this.time.delayedCall(500, () => {
+      if (txt && txt.active) txt.setColor('#aaaaff');
+    });
+  }
+
+  /**
+   * Phase 3-4: 적 정보 팝업 토글
+   */
+  private toggleEnemyInfoPopup(): void {
+    if (this.enemyInfoOpen) {
+      this.closeEnemyInfoPopup();
+    } else {
+      this.openEnemyInfoPopup();
+    }
+  }
+
+  private openEnemyInfoPopup(): void {
+    if (this.enemyInfoPopup) {
+      this.enemyInfoPopup.destroy();
+      this.enemyInfoPopup = null;
+    }
+
+    this.enemyInfoOpen = true;
+    const popupX = 900;
+    const popupY = 30;
+    const popupW = 300;
+
+    // 내용 구성
+    const lines: string[] = [];
+    lines.push(`📋 ${this.enemy.name}`);
+    lines.push(`HP: ${this.enemy.hp} / ${this.enemy.maxHp}`);
+    lines.push(`기: ${this.enemy.ki} / ${this.enemy.maxKi}`);
+
+    // 패시브 목록 (적)
+    if (this.enemy.passives.length > 0) {
+      lines.push('');
+      lines.push('[ 패시브 ]');
+      for (const passiveId of this.enemy.passives) {
+        const p = ENEMY_PASSIVES[passiveId];
+        if (p) lines.push(`• ${p.name}: ${p.description}`);
+      }
+    }
+
+    // 사용 가능 스킬 목록
+    lines.push('');
+    lines.push('[ 스킬 ]');
+    for (const skill of this.enemy.availableSkills) {
+      lines.push(`• ${skill.name} (기${skill.kiCost}): ${skill.description}`);
+    }
+
+    const popupText = lines.join('\n');
+    // 팝업 높이 동적 계산
+    const lineCount = lines.length;
+    const popupH = lineCount * 16 + 20;
+
+    const popup = this.add.container(popupX, popupY);
+    const bg = this.add.rectangle(popupW / 2, popupH / 2, popupW, popupH, 0x111122, 0.95)
+      .setStrokeStyle(2, 0x6644aa);
+    const txt = this.add.text(10, 10, popupText, {
+      fontSize: '11px',
+      color: '#ccccff',
+      fontFamily: 'Arial',
+      wordWrap: { width: popupW - 20 },
+    }).setOrigin(0, 0);
+
+    // 닫기 버튼
+    const closeBtn = this.add.text(popupW - 8, 4, '✕', {
+      fontSize: '14px', color: '#ff6666', fontFamily: 'Arial',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => this.closeEnemyInfoPopup());
+
+    popup.add([bg, txt, closeBtn]);
+    // 팝업이 클릭 이벤트를 통해 닫힐 수 있도록 bg도 인터랙티브
+    bg.setInteractive();
+    bg.on('pointerdown', () => this.closeEnemyInfoPopup());
+
+    this.enemyInfoPopup = popup;
+
+    // 팝업을 씬 맨 앞으로
+    this.children.bringToTop(popup);
+  }
+
+  private closeEnemyInfoPopup(): void {
+    this.enemyInfoOpen = false;
+    if (this.enemyInfoPopup) {
+      this.enemyInfoPopup.destroy();
+      this.enemyInfoPopup = null;
+    }
+  }
+
   // =================== 전투 플로우 ===================
 
   private startDrawPhase(): void {
@@ -459,10 +636,6 @@ export class BattleScene extends Phaser.Scene {
     return true;
   }
 
-  /**
-   * sense 스킬 활성화 시 슬롯 2개 제한 확인 (Phase 2-3)
-   * sense가 슬롯 0에 있으면 슬롯 1, 2만 사용 가능 (슬롯 2 인덱스 제한)
-   */
   private getMaxSlotCount(): number {
     return this.senseActive ? 2 : SLOT_COUNT;
   }
@@ -491,7 +664,6 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
-  /** 슬롯에 카드 배치 후 연계 보너스 힌트 갱신 */
   private placeCardInSlot(card: CardInstance, slotIndex: number): void {
     const slot = this.playerSlots[slotIndex];
     if (!slot.isEmpty()) {
@@ -505,7 +677,6 @@ export class BattleScene extends Phaser.Scene {
     this.handCards.forEach(c => c.setSelected(false));
     this.addLog(`슬롯 ${slotIndex + 1}: [${card.data.name}] 배치`);
 
-    // sense 스킬 배치 시 적 3슬롯 즉시 공개 (Phase 2-3)
     if (card.data.id === 'sense') {
       this.senseActive = true;
       this.revealEnemySlot(0, this.enemy.intent.action1);
@@ -514,7 +685,6 @@ export class BattleScene extends Phaser.Scene {
       this.addLog('🔍 [감지]: 적 3슬롯 전체 공개! (이번 턴 슬롯 2개 제한)');
     }
 
-    // scout 스킬 배치 시 적 다음 슬롯 행동 공개 (Phase 2-3 강화)
     if (card.data.id === 'scout') {
       const nextSlotIdx = slotIndex + 1;
       if (nextSlotIdx < SLOT_COUNT) {
@@ -524,14 +694,9 @@ export class BattleScene extends Phaser.Scene {
       }
     }
 
-    // 연계 보너스 힌트 갱신 (Phase 2-1)
     this.updateChainHints();
   }
 
-  /**
-   * 모든 슬롯의 연계 보너스 힌트 텍스트 갱신 (Phase 2-1)
-   * 배치 상태가 바뀔 때마다 호출
-   */
   private updateChainHints(): void {
     for (let i = 1; i < SLOT_COUNT; i++) {
       const prevSlot = this.playerSlots[i - 1];
@@ -559,7 +724,6 @@ export class BattleScene extends Phaser.Scene {
     if (removed) {
       this.addLog(`슬롯 ${slotIndex + 1}: ${removed.data.name} 제거됨`);
     }
-    // sense 제거 시 제한 해제
     if (removed?.data.id === 'sense') {
       this.senseActive = false;
     }
@@ -576,7 +740,6 @@ export class BattleScene extends Phaser.Scene {
       return;
     }
 
-    // sense 슬롯 제한: 슬롯 3에 카드가 있으면 제거
     if (this.senseActive && !this.playerSlots[2].isEmpty()) {
       this.playerSlots[2].removeCard();
       this.addLog('🔍 감지 효과: 슬롯 3 사용 불가 (제거됨)');
@@ -584,9 +747,10 @@ export class BattleScene extends Phaser.Scene {
 
     this.setPhase('executing');
 
-    if (this.enemy.type === 'boss') {
+    // Phase 3-1: 피콜로 패시브 신진대사 재생 (1/턴)
+    if (this.enemy.type === 'boss' && this.enemy.passives.includes('regenerate_passive')) {
       this.enemy.regenerate();
-      this.addLog('💚 피콜로가 재생으로 HP +1!');
+      this.addLog('💚 [신진대사 재생] 피콜로 HP +1!');
       this.updateHpDisplays();
     }
 
@@ -649,7 +813,12 @@ export class BattleScene extends Phaser.Scene {
     this.gameState.player.setBlocking(false);
     this.gameState.player.setDodging(false);
 
-    // ── 연계 보너스 계산 (Phase 2-1) ──
+    // Phase 3-2: regenerate 슬롯 취약 표시
+    if (enemyAction.type === 'regenerate') {
+      this.showVulnerableText(slotIndex);
+    }
+
+    // 연계 보너스 계산
     let chainBonus: ChainBonus = { ...NO_CHAIN };
     if (slotIndex > 0 && playerCard) {
       const prevCard = this.playerSlots[slotIndex - 1].getCard();
@@ -664,29 +833,21 @@ export class BattleScene extends Phaser.Scene {
       }
     }
 
-    // ki_shield 연속 효과 적용 (Phase 2-2)
     const kiShieldBonus = this.kiShieldNextSlotBonus;
     if (kiShieldBonus > 0) {
       this.kiShieldNextSlotBonus = 0;
     }
 
-    // 플레이어 카드 기 비용 계산 (연계 + ki_shield 보너스 적용)
     const playerKiCostBase = playerCard ? playerCard.data.kiCost : 0;
     const playerKiCostReduction = chainBonus.kiCostReduction + kiShieldBonus;
     const playerKiCost = Math.max(playerKiCostBase > 0 ? 1 : 0, playerKiCostBase - playerKiCostReduction);
     const enemyKiCost = enemyAction.kiCost;
 
-    // 우선순위 판정
     let priority: 'player_first' | 'enemy_first' | 'simultaneous';
-    if (playerKiCost > enemyKiCost) {
-      priority = 'player_first';
-    } else if (enemyKiCost > playerKiCost) {
-      priority = 'enemy_first';
-    } else {
-      priority = 'simultaneous';
-    }
+    if (playerKiCost > enemyKiCost) priority = 'player_first';
+    else if (enemyKiCost > playerKiCost) priority = 'enemy_first';
+    else priority = 'simultaneous';
 
-    // 플레이어 카드 유효성 체크
     type PlayerBattleType = 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'reactive' | 'swap_next' | 'reveal_all' | 'none';
     let playerBattleType: PlayerBattleType = 'none';
     let playerCardValid = false;
@@ -708,7 +869,6 @@ export class BattleScene extends Phaser.Scene {
         else if (effectType === 'mark')                            playerBattleType = 'mark';
         else if (effectType === 'swap_next')                       playerBattleType = 'swap_next';
         else if (effectType === 'reveal_all')                      playerBattleType = 'reveal_all';
-        // 반응 스킬들
         else if (effectType === 'counter' || effectType === 'ki_block' ||
                  effectType === 'ambush' || effectType === 'react_dodge') {
           playerBattleType = 'reactive';
@@ -716,14 +876,14 @@ export class BattleScene extends Phaser.Scene {
       }
     }
 
-    // 적 행동 분류
-    type EnemyBattleType = 'ki_gather' | 'attack' | 'defend';
+    type EnemyBattleType = 'ki_gather' | 'attack' | 'defend' | 'regenerate' | 'command';
     let enemyBattleType: EnemyBattleType;
-    if (enemyAction.type === 'ki_gather')   enemyBattleType = 'ki_gather';
-    else if (enemyAction.type === 'defend') enemyBattleType = 'defend';
-    else                                    enemyBattleType = 'attack';
+    if (enemyAction.type === 'ki_gather')       enemyBattleType = 'ki_gather';
+    else if (enemyAction.type === 'defend')     enemyBattleType = 'defend';
+    else if (enemyAction.type === 'regenerate') enemyBattleType = 'regenerate';
+    else if (enemyAction.type === 'command')    enemyBattleType = 'command';
+    else                                        enemyBattleType = 'attack';
 
-    // 순간이동 회피 판정
     const playerIsDodge = playerBattleType === 'defend' && playerCard?.data.effect.type === 'dodge';
     const enemyIsAttack = enemyBattleType === 'attack';
 
@@ -736,21 +896,20 @@ export class BattleScene extends Phaser.Scene {
 
     const enemyAttackMissed = playerDodgeSuccess;
 
-    // 반응 스킬 처리 (Phase 2-2)
     if (playerCardValid && playerBattleType === 'reactive' && playerCard) {
       await this.executeReactiveSkill(
         playerCard, playerSlot, slotIndex,
-        enemyAction, enemyBattleType, playerKiCost
+        enemyAction, enemyBattleType as any, playerKiCost
       );
     } else if (priority === 'player_first') {
-      await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType, enemyAttackMissed, false, playerKiCost, chainBonus);
-      await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, playerBattleType, playerCardValid, false, enemyAttackMissed);
+      await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, enemyAttackMissed, false, playerKiCost, chainBonus);
+      await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, enemyAttackMissed);
     } else if (priority === 'enemy_first') {
       const forceMissPlayer = enemyIsAttack && playerIsDodge && priority === 'enemy_first';
-      await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, playerBattleType, playerCardValid, false, false);
-      await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType, false, forceMissPlayer, playerKiCost, chainBonus);
+      await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, false);
+      await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, false, forceMissPlayer, playerKiCost, chainBonus);
     } else {
-      await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType, playerDodgeSuccess, playerKiCost, chainBonus);
+      await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, playerDodgeSuccess, playerKiCost, chainBonus);
     }
 
     playerSlot.setHighlight(false);
@@ -758,12 +917,32 @@ export class BattleScene extends Phaser.Scene {
     await this.wait(300);
   }
 
+  /**
+   * Phase 3-2: 취약 표시 - 적 위에 "⚠️ 취약!" 텍스트 표시
+   */
+  private showVulnerableText(slotIndex: number): void {
+    const x = SLOT_X_POSITIONS[slotIndex];
+    const y = LAYOUT.ENEMY_SLOTS_Y - 50;
+
+    const vulnText = this.add.text(x, y, '⚠️ 취약!', {
+      fontSize: '18px',
+      color: '#ffff00',
+      fontFamily: 'Arial',
+      fontStyle: 'bold',
+    }).setOrigin(0.5, 0.5);
+
+    this.tweens.add({
+      targets: vulnText,
+      y: y - 30,
+      alpha: 0,
+      duration: 1200,
+      ease: 'Power2',
+      onComplete: () => vulnText.destroy(),
+    });
+  }
+
   // =================== 반응 스킬 처리 (Phase 2-2) ===================
 
-  /**
-   * 반응 스킬 실행
-   * 적 행동을 먼저 확인하고 조건에 맞으면 반응 효과 발동
-   */
   private async executeReactiveSkill(
     playerCard: CardInstance,
     playerSlot: SlotUI,
@@ -775,29 +954,17 @@ export class BattleScene extends Phaser.Scene {
     const reactCondition = playerCard.data.reactCondition;
     const effectType = playerCard.data.effect.type;
 
-    // 조건 충족 여부 판단
     let conditionMet = false;
     switch (reactCondition) {
-      case 'enemy_attack':
-        conditionMet = enemyBattleType === 'attack';
-        break;
-      case 'enemy_ki_gather':
-        conditionMet = enemyBattleType === 'ki_gather';
-        break;
-      case 'enemy_defend':
-        conditionMet = enemyBattleType === 'defend';
-        break;
-      case 'enemy_energy_attack':
-        // 적이 에너지 공격 계열(attack_s, attack_l, special)인지 확인
-        conditionMet = enemyBattleType === 'attack';
-        break;
+      case 'enemy_attack':        conditionMet = enemyBattleType === 'attack';    break;
+      case 'enemy_ki_gather':     conditionMet = enemyBattleType === 'ki_gather'; break;
+      case 'enemy_defend':        conditionMet = enemyBattleType === 'defend';    break;
+      case 'enemy_energy_attack': conditionMet = enemyBattleType === 'attack';    break;
     }
 
-    // 기 소모 (조건 충족 여부와 관계없이 배치된 카드는 기 소모)
     if (!this.gameState.player.hasEnoughKi(actualKiCost)) {
       this.addLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효`);
       await playerSlot.flashInsufficientKi();
-      // 적 행동은 그대로 실행
       await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, 'none', false, false, false);
       return;
     }
@@ -807,24 +974,18 @@ export class BattleScene extends Phaser.Scene {
     this.updateKiGauges();
 
     if (!conditionMet) {
-      // 조건 불충족: 효과 없음 (기만 소모)
       this.addLog(`⚪ [${playerCard.data.name}]: 조건 불충족 → 효과 없음`);
       await playerSlot.flashExecuted();
-      // 적 행동은 정상 실행
       await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, 'none', false, false, false);
       return;
     }
 
-    // 조건 충족: 반응 효과 발동
     this.addLog(`⚡ [${playerCard.data.name}]: 반응 발동!`);
 
     switch (effectType) {
       case 'counter': {
-        // counter_stance: 피해 -2 + 반격 2뎀
         const counterDmg = playerCard.data.effect.value;
         this.addLog(`🥊 [카운터 자세]: 적 공격 경감(-2) + 반격 ${counterDmg}뎀`);
-
-        // 적 행동 실행 (피해 -2 적용)
         const enemyResult = this.enemy.executeAction(enemyAction);
         if (!enemyResult.skipped && enemyResult.damage > 0) {
           const reducedDmg = Math.max(0, enemyResult.damage - 2);
@@ -838,8 +999,6 @@ export class BattleScene extends Phaser.Scene {
           }
         }
         this.updateKiGauges();
-
-        // 반격 피해
         const counterActual = this.enemy.takeDamage(counterDmg);
         this.gameState.recordDamageDealt(counterActual);
         this.addLog(`⚡ 반격: 적에게 ${counterActual} 피해!`);
@@ -848,37 +1007,25 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'ki_block': {
-        // ki_shield: 적 기모으기 차단 + 다음 슬롯 기소모 -1
         const blockAmt = playerCard.data.effect.value;
         this.addLog(`🔰 [기 보호막]: 적 기+${blockAmt} 차단`);
-
-        // 적 기모으기 실행하되 기 획득량을 차단
         const enemyResult = this.enemy.executeAction(enemyAction);
         if (!enemyResult.skipped && enemyResult.kiGained > 0) {
-          // 차단: 획득한 기를 다시 빼앗음
           const blocked = Math.min(enemyResult.kiGained, blockAmt);
-          // enemy.ki는 직접 접근 불가이므로 stealKi로 차단
           this.enemy.stealKi(blocked);
           this.addLog(`🔰 적 기 +${enemyResult.kiGained} → ${blocked} 차단됨`);
         }
         this.updateKiGauges();
-
-        // 다음 슬롯 기소모 -1 효과 등록
         this.kiShieldNextSlotBonus = 1;
         this.addLog(`🔰 다음 슬롯 기소모 -1 적용 예약`);
         break;
       }
 
       case 'ambush': {
-        // ambush_counter: 막기 무효 + 관통 피해 4
         const ambushDmg = playerCard.data.effect.value;
         this.addLog(`🗡️ [잠복 반격]: 적 막기 무효 + 관통 ${ambushDmg}뎀`);
-
-        // 적은 막기 상태이므로 executeAction만 호출 (피해는 없음)
         this.enemy.executeAction(enemyAction);
         this.updateKiGauges();
-
-        // 막기 무시하고 직접 피해
         const ambushActual = this.enemy.takeDamage(ambushDmg);
         this.gameState.recordDamageDealt(ambushActual);
         this.addLog(`⚡ 관통 피해: 적에게 ${ambushActual} 피해!`);
@@ -887,12 +1034,9 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'react_dodge': {
-        // reactive_teleport: 에너지 공격 자동 회피
         this.addLog(`💨 [반응 순간이동]: 에너지 공격 자동 회피!`);
-
         const enemyResult = this.enemy.executeAction(enemyAction);
         this.updateKiGauges();
-
         if (enemyResult.damage > 0) {
           this.addLog(`💨 적 [${enemyAction.name}] 회피 성공! (${enemyResult.damage}뎀 무효)`);
         }
@@ -913,7 +1057,7 @@ export class BattleScene extends Phaser.Scene {
     playerSlot: SlotUI,
     slotIndex: number,
     enemyAction: EnemyAction,
-    enemyBattleType: 'ki_gather' | 'attack' | 'defend',
+    enemyBattleType: 'ki_gather' | 'attack' | 'defend' | 'regenerate' | 'command',
     enemyAttackMissed: boolean,
     dodgeForceFail: boolean = false,
     actualKiCost?: number,
@@ -924,7 +1068,6 @@ export class BattleScene extends Phaser.Scene {
     const kiCost = actualKiCost ?? playerCard.data.kiCost;
     const bonus = chainBonus ?? NO_CHAIN;
 
-    // 기 소모
     this.gameState.player.spendKi(kiCost);
     if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
     this.updateKiGauges();
@@ -935,7 +1078,7 @@ export class BattleScene extends Phaser.Scene {
         this.addLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
         await playerSlot.flashExecuted();
 
-        const enemyEffective = enemyBattleType === 'attack' && !enemyAttackMissed;
+        const enemyEffective = (enemyBattleType === 'attack') && !enemyAttackMissed;
         if (enemyEffective) {
           const results = this.skillSystem.trigger({
             type: 'ki_gather_while_attacked',
@@ -950,7 +1093,11 @@ export class BattleScene extends Phaser.Scene {
             context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
           });
           for (const r of results) {
-            if (r.message) this.addLog(r.message);
+            if (r.message) {
+              this.addLog(r.message);
+              // Phase 3-4: 명상 패시브 발동 번쩍임
+              if (r.passiveId === 'passive_meditate') this.flashPassiveText('passive_meditate');
+            }
             if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
           }
           this.updateKiGauges();
@@ -972,16 +1119,29 @@ export class BattleScene extends Phaser.Scene {
         } else {
           this.gameState.player.setBlocking(true);
           this.addLog(`🛡️ [${playerCard.data.name}]: 막기 준비!`);
+
+          // Phase 3-1: 피콜로 무한의 망토 패시브 처리
+          if (this.enemy.type === 'boss' && this.enemy.passives.includes('infinite_cloak')) {
+            this.enemy.addKi(1);
+            this.addLog('🌀 [무한의 망토] 발동! 적 기+1');
+            this.updateKiGauges();
+            this.flashEnemySlotBg(slotIndex, 0x8800ff);
+          }
         }
         await playerSlot.flashExecuted();
 
-        if (!isDodge && enemyBattleType === 'attack' && !enemyAttackMissed) {
+        // 막기 성공 패시브 트리거 (공격 슬롯 대상일 때만)
+        if (!isDodge && (enemyBattleType === 'attack') && !enemyAttackMissed) {
           const results = this.skillSystem.trigger({
             type: 'block_success',
             context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
           });
           for (const r of results) {
-            if (r.message) this.addLog(r.message);
+            if (r.message) {
+              this.addLog(r.message);
+              // Phase 3-4: 패링 패시브 발동 번쩍임
+              if (r.passiveId === 'passive_parry') this.flashPassiveText('passive_parry');
+            }
             if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
           }
           this.updateKiGauges();
@@ -998,7 +1158,7 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'steal': {
-        const enemyAttacking = enemyBattleType === 'attack' && !enemyAttackMissed;
+        const enemyAttacking = (enemyBattleType === 'attack') && !enemyAttackMissed;
         if (enemyAttacking) {
           this.addLog(`❌ [${playerCard.data.name}]: 공격받아 강탈 실패!`);
         } else {
@@ -1006,6 +1166,11 @@ export class BattleScene extends Phaser.Scene {
           if (stolen > 0) {
             this.gameState.player.gainKi(stolen);
             this.addLog(`💰 [${playerCard.data.name}]: 적에게서 기 ${stolen} 강탈!`);
+            // Phase 3-3: 강탈로 명령 무효화
+            if (this.enemy.commandActive) {
+              this.enemy.cancelCommand();
+              this.addLog('💰 강탈로 레드리본 대령의 명령 무효화!');
+            }
           } else {
             this.addLog(`💰 [${playerCard.data.name}]: 강탈했지만 적의 기가 없었다.`);
           }
@@ -1016,8 +1181,17 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'attack': {
-        // MOVE 연계 → 막기 관통
-        const blockedByEnemy = enemyBattleType === 'defend' && !bonus.bypassDefend;
+        const blockedByEnemy = (enemyBattleType === 'defend') && !bonus.bypassDefend;
+
+        // Phase 3-2: 강한 공격(3 이상)이 regenerate 슬롯 명중 시 재생 취소
+        if (enemyBattleType === 'regenerate') {
+          const attackPower = playerCard.data.effect.value + bonus.damageBonus;
+          if (attackPower >= 3) {
+            this.enemy.cancelRegeneration();
+            this.addLog('⚡ 강한 공격으로 피콜로 재생 효과 무효화!');
+          }
+        }
+
         if (blockedByEnemy) {
           this.addLog(`🛡️ 적이 막기로 [${playerCard.data.name}]을 막았다!`);
           await playerSlot.flashExecuted();
@@ -1031,8 +1205,7 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'swap_next': {
-        // 강화된 scout (Phase 2-3): 적 다음 슬롯 공개 + 카드 교체 가능
-        const enemyAttacking = enemyBattleType === 'attack' && !enemyAttackMissed;
+        const enemyAttacking = (enemyBattleType === 'attack') && !enemyAttackMissed;
         if (enemyAttacking) {
           this.addLog(`❌ [${playerCard.data.name}]: 공격받아 눈치보기 실패!`);
         } else {
@@ -1041,12 +1214,16 @@ export class BattleScene extends Phaser.Scene {
             const nextActions = [this.enemy.intent.action1, this.enemy.intent.action2, this.enemy.intent.action3];
             this.revealEnemySlot(nextIdx, nextActions[nextIdx]);
             this.addLog(`👁 [눈치보기]: 적 슬롯 ${nextIdx + 1} 공개! 다음 슬롯 교체 가능.`);
-            // 다음 슬롯 카드 제거 (교체 가능 상태)
             if (!this.playerSlots[nextIdx].isEmpty()) {
               const removed = this.playerSlots[nextIdx].removeCard();
               if (removed) {
                 this.addLog(`슬롯 ${nextIdx + 1}: ${removed.data.name} 제거 (교체 가능)`);
               }
+            }
+            // Phase 3-3: 눈치보기로 명령 무효화
+            if (this.enemy.commandActive) {
+              this.enemy.cancelCommand();
+              this.addLog('👁 감지로 레드리본 대령의 명령 무효화!');
             }
           }
         }
@@ -1055,8 +1232,12 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'reveal_all': {
-        // sense (Phase 2-3): 이미 배치 시 공개됨, 실행 시 로그만
         this.addLog(`🔍 [감지]: 적 전략 분석 완료`);
+        // Phase 3-3: 감지로 명령 무효화
+        if (this.enemy.commandActive) {
+          this.enemy.cancelCommand();
+          this.addLog('🔍 감지로 레드리본 대령의 명령 무효화!');
+        }
         await playerSlot.flashExecuted();
         break;
       }
@@ -1071,7 +1252,7 @@ export class BattleScene extends Phaser.Scene {
    */
   private async executeEnemyAction(
     enemyAction: EnemyAction,
-    enemyBattleType: 'ki_gather' | 'attack' | 'defend',
+    enemyBattleType: 'ki_gather' | 'attack' | 'defend' | 'regenerate' | 'command',
     slotIndex: number,
     playerBattleType: string,
     playerCardValid: boolean,
@@ -1079,25 +1260,59 @@ export class BattleScene extends Phaser.Scene {
     enemyAttackMissed: boolean
   ): Promise<void> {
     const enemyResult = this.enemy.executeAction(enemyAction);
+
     if (enemyResult.skipped) {
       this.addLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`);
       this.flashEnemySlotBg(slotIndex, 0x880000);
       return;
     }
+
     if (enemyResult.kiGained > 0) {
       this.addLog(`⚡ 적 기모으기: +${enemyResult.kiGained}`);
     }
     this.updateKiGauges();
 
-    if (enemyBattleType === 'attack' && !enemyAttackMissed && enemyResult.damage > 0) {
+    // Phase 3-2: 재생집중 처리
+    if (enemyBattleType === 'regenerate') {
+      if (this.enemy.regenerationCancelled) {
+        this.addLog('💔 [재생집중] 강한 공격으로 재생 무효화됨!');
+      } else {
+        this.addLog(`💚 [재생집중] 피콜로 HP +2 회복!`);
+        this.updateHpDisplays();
+      }
+      return;
+    }
+
+    // Phase 3-3: 명령 하달 처리
+    if (enemyBattleType === 'command') {
+      if (this.enemy.commandActive) {
+        this.addLog('📢 [명령 하달] 다음 슬롯 공격에 관통 속성 부여!');
+      } else {
+        this.addLog('📢 [명령 하달] 명령이 무효화되었다!');
+      }
+      return;
+    }
+
+    // 일반 공격 처리
+    if ((enemyBattleType === 'attack') && !enemyAttackMissed && enemyResult.damage > 0) {
       const playerBlocking = this.gameState.player.isBlocking;
       const playerDodging  = this.gameState.player.isDodging;
 
+      // Phase 3-3: 관통 공격 (attack_pierce) - commandActive 시 막기 무시
+      const isPierce = enemyAction.type === 'attack_pierce' && this.enemy.commandActive;
+
       if (playerDodging) {
         this.addLog(`💨 순간이동으로 [${enemyAction.name}] 회피!`);
-      } else if (playerBlocking) {
+        // 명령 소비
+        if (isPierce) this.enemy.cancelCommand();
+      } else if (playerBlocking && !isPierce) {
         this.addLog(`🛡️ 막기로 [${enemyAction.name}] 상쇄!`);
       } else {
+        if (isPierce && playerBlocking) {
+          this.addLog(`⚔️ [관통 공격] 막기를 무시하고 관통!`);
+          this.enemy.cancelCommand(); // 명령 효과 소비
+        }
+
         let finalDamage = enemyResult.damage;
 
         if (playerBattleType === 'ki_gather' && playerCardValid) {
@@ -1115,7 +1330,7 @@ export class BattleScene extends Phaser.Scene {
         this.addLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해!`);
         if (actualDmg > 0) await this.showDamageEffect(true, actualDmg);
       }
-    } else if (enemyBattleType === 'attack' && enemyAttackMissed) {
+    } else if ((enemyBattleType === 'attack') && enemyAttackMissed) {
       this.addLog(`💨 [${enemyAction.name}] 빗나감! (순간이동 회피)`);
     }
   }
@@ -1130,7 +1345,7 @@ export class BattleScene extends Phaser.Scene {
     playerSlot: SlotUI,
     slotIndex: number,
     enemyAction: EnemyAction,
-    enemyBattleType: 'ki_gather' | 'attack' | 'defend',
+    enemyBattleType: 'ki_gather' | 'attack' | 'defend' | 'regenerate' | 'command',
     playerDodgeSuccess: boolean,
     actualKiCost?: number,
     chainBonus?: ChainBonus
@@ -1139,7 +1354,7 @@ export class BattleScene extends Phaser.Scene {
 
     await this.executePlayerAction(
       playerCard, playerCardValid, playerBattleType as any,
-      playerSlot, slotIndex, enemyAction, enemyBattleType,
+      playerSlot, slotIndex, enemyAction, enemyBattleType as any,
       playerDodgeSuccess, false, actualKiCost, chainBonus
     );
 
@@ -1151,14 +1366,13 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /**
-   * 공격 카드 효과 적용 (연계 보너스 + 표식 멀티플라이어 포함, Phase 2-1)
+   * 공격 카드 효과 적용 (연계 보너스 포함)
    */
   private async applyAttackEffect(card: CardInstance, slot: SlotUI, chainBonus?: ChainBonus): Promise<void> {
     const effect = card.data.effect;
     const bonus = chainBonus ?? NO_CHAIN;
     const enemyMark = this.enemy.mark;
 
-    // 표식 배수: 기본 (1 + mark) × markMultiplier(연계)
     const baseMarkMultiplier = 1 + enemyMark;
     const totalMarkMultiplier = baseMarkMultiplier * bonus.markMultiplier;
 
@@ -1168,15 +1382,12 @@ export class BattleScene extends Phaser.Scene {
       const totalBeforeMark = baseDmg + bonusDmg;
       const totalDmg = Math.floor(totalBeforeMark * totalMarkMultiplier);
 
-      // 로그 상세 출력
       const logParts: string[] = [];
       if (enemyMark > 0 || bonus.markMultiplier > 1) {
         logParts.push(`표식×${totalMarkMultiplier}`);
         this.enemy.consumeMark();
       }
-      if (bonusDmg > 0) {
-        logParts.push(`연계+${bonusDmg}뎀`);
-      }
+      if (bonusDmg > 0) logParts.push(`연계+${bonusDmg}뎀`);
 
       const dmg = this.enemy.takeDamage(totalDmg);
       this.gameState.recordDamageDealt(dmg);
@@ -1188,10 +1399,14 @@ export class BattleScene extends Phaser.Scene {
       }
       await this.showDamageEffect(false, dmg);
 
-      this.skillSystem.trigger({
+      const results = this.skillSystem.trigger({
         type: 'attack_hit',
         context: { player: this.gameState.player, enemy: this.enemy, slotIndex: 0 },
       });
+      // Phase 3-4: 연속파 패시브 발동 번쩍임
+      for (const r of results) {
+        if (r.passiveId === 'passive_rapid') this.flashPassiveText('passive_rapid');
+      }
     }
 
     await slot.flashExecuted();
@@ -1304,13 +1519,29 @@ export class BattleScene extends Phaser.Scene {
     const actionText = container.getAt(2) as Phaser.GameObjects.Text;
     const bg = container.getAt(0) as Phaser.GameObjects.Rectangle;
 
-    actionText.setText(`${action.name} (기${action.kiCost})`);
+    // Phase 3-3: 관통 표시
+    const isPierce = action.type === 'attack_pierce';
+    const isCommand = action.type === 'command';
+    const isRegen = action.type === 'regenerate';
+    const isAttack = action.type === 'attack_s' || action.type === 'attack_l' || action.type === 'special' || isPierce;
 
-    const isAttack = action.type === 'attack_s' || action.type === 'attack_l' || action.type === 'special';
+    let displayName = `${action.name} (기${action.kiCost})`;
+    if (isPierce && this.enemy.commandActive) displayName += ' [관통]';
+
+    actionText.setText(displayName);
+
     if (isAttack) {
-      actionText.setColor('#ff8888');
-      bg.setFillStyle(0x440000);
-      bg.setStrokeStyle(1, 0xaa2222);
+      actionText.setColor(isPierce ? '#ffaa44' : '#ff8888');
+      bg.setFillStyle(isPierce ? 0x442200 : 0x440000);
+      bg.setStrokeStyle(1, isPierce ? 0xaa6600 : 0xaa2222);
+    } else if (isCommand) {
+      actionText.setColor('#ffff44');
+      bg.setFillStyle(0x222200);
+      bg.setStrokeStyle(1, 0xaaaa00);
+    } else if (isRegen) {
+      actionText.setColor('#44ffaa');
+      bg.setFillStyle(0x002222);
+      bg.setStrokeStyle(1, 0x00aa66);
     } else {
       actionText.setColor('#88ff88');
       bg.setFillStyle(0x002200);

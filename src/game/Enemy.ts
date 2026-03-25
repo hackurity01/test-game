@@ -5,11 +5,14 @@ export type EnemyType = 'normal' | 'elite' | 'boss';
 
 /** 적 행동 타입 */
 export type EnemyActionType =
-  | 'ki_gather'  // 기모으기
-  | 'attack_s'   // 소형 공격
-  | 'attack_l'   // 대형 공격
-  | 'defend'     // 막기
-  | 'special';   // 특수 (보스)
+  | 'ki_gather'     // 기모으기
+  | 'attack_s'      // 소형 공격
+  | 'attack_l'      // 대형 공격
+  | 'defend'        // 막기
+  | 'special'       // 특수 (보스)
+  | 'regenerate'    // 재생집중 (피콜로 Phase 3-2)
+  | 'command'       // 명령 하달 (레드리본 대령 Phase 3-3)
+  | 'attack_pierce'; // 관통 공격 (레드리본 대령 Phase 3-3)
 
 /** 적 행동 정의 */
 export interface EnemyAction {
@@ -43,6 +46,30 @@ export interface EnemyPattern {
   telegraphs: (string | null)[];
 }
 
+/** 적 패시브 타입 (Phase 3-1) */
+export type EnemyPassiveId = 'regenerate_passive' | 'infinite_cloak';
+
+/** 적 패시브 정의 */
+export interface EnemyPassive {
+  id: EnemyPassiveId;
+  name: string;
+  description: string;
+}
+
+/** 적 패시브 데이터 */
+export const ENEMY_PASSIVES: Record<EnemyPassiveId, EnemyPassive> = {
+  regenerate_passive: {
+    id: 'regenerate_passive',
+    name: '신진대사 재생',
+    description: '매 턴 시작 HP +1',
+  },
+  infinite_cloak: {
+    id: 'infinite_cloak',
+    name: '무한의 망토',
+    description: '플레이어가 막기 사용 시 기 +1',
+  },
+};
+
 /** 적 상태 */
 export interface EnemyState {
   type: EnemyType;
@@ -53,8 +80,12 @@ export interface EnemyState {
   currentKi: number;
   intent: EnemyIntent;
   availableSkills: EnemyAction[];
-  mark: number;        // 표식 중첩 수
-  patternIndex: number; // 패턴 시퀀스 내 현재 인덱스 (턴마다 +1 순환)
+  mark: number;                        // 표식 중첩 수
+  patternIndex: number;                // 패턴 시퀀스 내 현재 인덱스 (턴마다 +1 순환)
+  // Phase 3 추가 필드
+  passives: EnemyPassiveId[];          // 패시브 목록 (Phase 3-1)
+  commandActive: boolean;              // 명령 하달 활성화 여부 (Phase 3-3)
+  regenerationCancelled: boolean;      // 재생 효과 이번 턴 취소 여부 (Phase 3-2)
 }
 
 // ===== 적 행동 데이터 =====
@@ -106,22 +137,64 @@ const BOSS_SPECIAL_ACTION: EnemyAction = {
   damage: 8,
 };
 
+// ===== Phase 3-2: 피콜로 재생집중 행동 =====
+const REGENERATE_ACTION: EnemyAction = {
+  type: 'regenerate',
+  name: '재생집중',
+  description: '이번 턴 HP +2 회복 (강한 공격에 취약)',
+  kiCost: 0,
+};
+
+// ===== Phase 3-3: 레드리본 대령 행동 =====
+const COMMAND_ACTION: EnemyAction = {
+  type: 'command',
+  name: '명령 하달',
+  description: '다음 슬롯 공격에 관통 속성 부여 (강탈/감지로 무효화 가능)',
+  kiCost: 0,
+};
+
+const ATTACK_PIERCE_ACTION: EnemyAction = {
+  type: 'attack_pierce',
+  name: '관통 공격',
+  description: '플레이어에게 5 피해 (명령 활성 시 막기로 막히지 않음)',
+  kiCost: 0,
+  damage: 5,
+};
+
 // ===== 엘리트(피라프단) 행동 맵: EnemyActionType → EnemyAction =====
 const ELITE_ACTION_MAP: Record<EnemyActionType, EnemyAction> = {
-  ki_gather: KI_GATHER_ACTION,
-  attack_s:  ATTACK_S_ACTION,
-  attack_l:  ATTACK_L_ACTION,   // 피라프단은 비용2/피해4 버전 사용
-  defend:    DEFEND_ACTION,
-  special:   ELITE_ATTACK_ACTION, // 미사용이지만 타입 완결을 위해 포함
+  ki_gather:     KI_GATHER_ACTION,
+  attack_s:      ATTACK_S_ACTION,
+  attack_l:      ATTACK_L_ACTION,
+  defend:        DEFEND_ACTION,
+  special:       ELITE_ATTACK_ACTION,
+  regenerate:    REGENERATE_ACTION,    // 피라프단은 미사용이지만 타입 완결을 위해
+  command:       COMMAND_ACTION,
+  attack_pierce: ATTACK_PIERCE_ACTION,
 };
 
 // ===== 보스(피콜로) 행동 맵 =====
 const BOSS_ACTION_MAP: Record<EnemyActionType, EnemyAction> = {
-  ki_gather: KI_GATHER_ACTION,
-  attack_s:  ATTACK_S_ACTION,
-  attack_l:  ATTACK_L_ACTION,
-  defend:    DEFEND_ACTION,
-  special:   BOSS_SPECIAL_ACTION,
+  ki_gather:     KI_GATHER_ACTION,
+  attack_s:      ATTACK_S_ACTION,
+  attack_l:      ATTACK_L_ACTION,
+  defend:        DEFEND_ACTION,
+  special:       BOSS_SPECIAL_ACTION,
+  regenerate:    REGENERATE_ACTION,   // Phase 3-2 추가
+  command:       COMMAND_ACTION,
+  attack_pierce: ATTACK_PIERCE_ACTION,
+};
+
+// ===== Phase 3-3: 레드리본 대령 행동 맵 =====
+const RED_RIBBON_ACTION_MAP: Record<EnemyActionType, EnemyAction> = {
+  ki_gather:     KI_GATHER_ACTION,
+  attack_s:      ATTACK_S_ACTION,
+  attack_l:      ATTACK_L_ACTION,
+  defend:        DEFEND_ACTION,
+  special:       ELITE_ATTACK_ACTION,
+  regenerate:    REGENERATE_ACTION,
+  command:       COMMAND_ACTION,
+  attack_pierce: ATTACK_PIERCE_ACTION,
 };
 
 // ===== 피라프단(elite) 고정 패턴 =====
@@ -137,6 +210,16 @@ const PIRAFU_PATTERNS: EnemyPattern[] = [
     condition: (hp, maxHp) => hp / maxHp <= 0.5,
     sequence: ['ki_gather', 'attack_l', 'attack_l'],
     telegraphs: ['분노하며 기를 모은다!', null, null],
+  },
+];
+
+// ===== Phase 3-3: 레드리본 대령 고정 패턴 =====
+const RED_RIBBON_PATTERNS: EnemyPattern[] = [
+  {
+    // 단일 패턴: command → attack_pierce → defend 반복
+    condition: () => true,
+    sequence: ['command', 'attack_pierce', 'defend'],
+    telegraphs: ['명령을 내린다!', null, null],
   },
 ];
 
@@ -161,10 +244,11 @@ const PICCOLO_PATTERNS: EnemyPattern[] = [
     telegraphs: [null, '기를 끌어모은다...', null],
   },
   {
-    // 패턴3: HP < 30% → 마지막 발악
+    // 패턴3: HP < 30% → 마지막 발악 + 재생집중 (Phase 3-2)
+    // 두 번째 슬롯을 regenerate로 변경 → 강한 공격 취약 타이밍
     condition: (hp, maxHp) => hp / maxHp < 0.3,
-    sequence: ['special', 'attack_l', 'defend'],
-    telegraphs: ['눈에서 빛이 모인다...', null, null],
+    sequence: ['special', 'regenerate', 'defend'],
+    telegraphs: ['눈에서 빛이 모인다...', '⚠️ 재생 집중 중...', null],
   },
 ];
 
@@ -201,24 +285,55 @@ export class Enemy {
           availableSkills: [KI_GATHER_ACTION, ATTACK_S_ACTION, DEFEND_ACTION],
           mark: 0,
           patternIndex: 0,
+          passives: [],
+          commandActive: false,
+          regenerationCancelled: false,
         };
       }
       case 'elite': {
-        const hp = Math.floor(Math.random() * 6) + 15;  // 15~20
-        return {
-          type,
-          name: '피라프단',
-          maxHp: hp,
-          currentHp: hp,
-          maxKi: 5,
-          currentKi: 0,
-          intent: placeholder,
-          availableSkills: [KI_GATHER_ACTION, ATTACK_S_ACTION, DEFEND_ACTION, ATTACK_L_ACTION, ELITE_ATTACK_ACTION],
-          mark: 0,
-          patternIndex: 0,
-        };
+        // Phase 3-3: 랜덤으로 피라프단 or 레드리본 대령 선택
+        const isColonel = Math.random() < 0.5;
+
+        if (isColonel) {
+          // 레드리본 대령 (HP 18~22)
+          const hp = Math.floor(Math.random() * 5) + 18;
+          return {
+            type,
+            name: '레드리본 대령',
+            maxHp: hp,
+            currentHp: hp,
+            maxKi: 4,
+            currentKi: 0,
+            intent: placeholder,
+            availableSkills: [COMMAND_ACTION, ATTACK_PIERCE_ACTION, DEFEND_ACTION],
+            mark: 0,
+            patternIndex: 0,
+            passives: [],
+            commandActive: false,
+            regenerationCancelled: false,
+          };
+        } else {
+          // 피라프단 (HP 15~20)
+          const hp = Math.floor(Math.random() * 6) + 15;
+          return {
+            type,
+            name: '피라프단',
+            maxHp: hp,
+            currentHp: hp,
+            maxKi: 5,
+            currentKi: 0,
+            intent: placeholder,
+            availableSkills: [KI_GATHER_ACTION, ATTACK_S_ACTION, DEFEND_ACTION, ATTACK_L_ACTION, ELITE_ATTACK_ACTION],
+            mark: 0,
+            patternIndex: 0,
+            passives: [],
+            commandActive: false,
+            regenerationCancelled: false,
+          };
+        }
       }
       case 'boss':
+        // Phase 3-1: 피콜로에 패시브 2개 추가
         return {
           type,
           name: '피콜로',
@@ -227,9 +342,12 @@ export class Enemy {
           maxKi: 5,
           currentKi: 0,
           intent: placeholder,
-          availableSkills: [KI_GATHER_ACTION, ATTACK_S_ACTION, DEFEND_ACTION, ATTACK_L_ACTION, BOSS_SPECIAL_ACTION],
+          availableSkills: [KI_GATHER_ACTION, ATTACK_S_ACTION, DEFEND_ACTION, ATTACK_L_ACTION, BOSS_SPECIAL_ACTION, REGENERATE_ACTION],
           mark: 0,
           patternIndex: 0,
+          passives: ['regenerate_passive', 'infinite_cloak'],  // Phase 3-1
+          commandActive: false,
+          regenerationCancelled: false,
         };
     }
   }
@@ -237,16 +355,24 @@ export class Enemy {
   /**
    * 다음 인텐트(3개 행동) 생성
    * - normal: 기존 랜덤 로직 유지
-   * - elite/boss: 고정 패턴 시퀀스 사용
-   * 호출마다 patternIndex가 1 증가 (순환)
+   * - elite: 피라프단 or 레드리본 대령 분기
+   * - boss: 피콜로 고정 패턴
    */
   generateIntent(): void {
+    // 재생 취소 플래그 초기화 (새 턴 인텐트 생성)
+    this.state.regenerationCancelled = false;
+
     switch (this.state.type) {
       case 'normal':
         this.generateNormalIntent();
         break;
       case 'elite':
-        this.generatePatternIntent(PIRAFU_PATTERNS, ELITE_ACTION_MAP);
+        // Phase 3-3: 이름으로 variant 분기
+        if (this.state.name === '레드리본 대령') {
+          this.generatePatternIntent(RED_RIBBON_PATTERNS, RED_RIBBON_ACTION_MAP);
+        } else {
+          this.generatePatternIntent(PIRAFU_PATTERNS, ELITE_ACTION_MAP);
+        }
         break;
       case 'boss':
         this.generatePatternIntent(PICCOLO_PATTERNS, BOSS_ACTION_MAP);
@@ -258,7 +384,6 @@ export class Enemy {
 
   /**
    * 일반 적(레드리본 병사): 랜덤 행동 생성
-   * 단순한 적이므로 기존 랜덤 로직 유지
    */
   private generateNormalIntent(): void {
     const ki0 = this.state.currentKi;
@@ -272,51 +397,45 @@ export class Enemy {
       action1,
       action2,
       action3,
-      telegraphs: [null, null, null],  // 랜덤 적은 텔레그래프 없음
+      telegraphs: [null, null, null],
     };
-    // patternIndex는 normal 적에서는 변경하지 않음
   }
 
   /**
    * 패턴 기반 인텐트 생성 (elite/boss 공용)
-   * 조건에 맞는 첫 번째 패턴을 선택하고 patternIndex 위치부터 3개 행동을 결정
    */
   private generatePatternIntent(
     patterns: EnemyPattern[],
     actionMap: Record<EnemyActionType, EnemyAction>
   ): void {
-    // 현재 HP/기 상태 기준으로 발동할 패턴 선택 (조건이 맞는 첫 번째 패턴)
     const selectedPattern = patterns.find(p =>
       p.condition(this.state.currentHp, this.state.maxHp, this.state.currentKi)
-    ) ?? patterns[patterns.length - 1];  // 조건 없을 시 마지막 패턴 (폴백)
+    ) ?? patterns[patterns.length - 1];
 
     const seqLen = selectedPattern.sequence.length;
 
-    // 3개 슬롯에 대해 행동 및 텔레그래프 결정
     const actions: EnemyAction[] = [];
     const telegraphs: (string | null)[] = [];
 
-    // 기 시뮬레이션: 슬롯 간 기 연산을 추적
     let simKi = this.state.currentKi;
 
     for (let i = 0; i < 3; i++) {
-      // patternIndex를 시작점으로 순환 접근
       const seqIdx = (this.state.patternIndex + i) % seqLen;
       let actionType = selectedPattern.sequence[seqIdx];
       let telegraph = selectedPattern.telegraphs[seqIdx];
 
-      // 기 부족으로 해당 행동 불가 → ki_gather로 자동 대체
       const intendedAction = actionMap[actionType];
-      if (simKi < intendedAction.kiCost) {
+      // command, regenerate, attack_pierce, defend 는 기 부족 대체 없음
+      const noFallback = ['command', 'regenerate', 'attack_pierce', 'defend'].includes(actionType);
+      if (!noFallback && simKi < intendedAction.kiCost) {
         actionType = 'ki_gather';
-        telegraph = null;  // 강제 대체 시 텔레그래프 미표시
+        telegraph = null;
       }
 
       const finalAction = actionMap[actionType];
       actions.push(finalAction);
       telegraphs.push(telegraph);
 
-      // 시뮬레이션 기 업데이트
       simKi = Math.min(
         this.state.maxKi,
         simKi + (finalAction.kiGain ?? 0) - finalAction.kiCost
@@ -330,13 +449,9 @@ export class Enemy {
       telegraphs,
     };
 
-    // patternIndex 1 증가 (다음 턴에는 한 칸 시프트된 시퀀스 사용)
     this.state.patternIndex = (this.state.patternIndex + 1) % seqLen;
   }
 
-  // ===== 일반 적 랜덤 선택 =====
-
-  /** 일반 적: 25% 막기, 기 있으면 공격, 없으면 기모으기 */
   private chooseNormalAction(ki: number): EnemyAction {
     if (Math.random() < 0.25) return DEFEND_ACTION;
     if (ki >= ATTACK_S_ACTION.kiCost) return ATTACK_S_ACTION;
@@ -345,20 +460,22 @@ export class Enemy {
 
   // ===== 행동 실행 =====
 
-  /** 적 행동 실행 (기 소모/획득, 피해 반환) */
+  /** 적 행동 실행 */
   executeAction(action: EnemyAction): {
     damage: number;
     kiGained: number;
     skipped: boolean;
+    healed: number;
   } {
     if (this.state.currentKi < action.kiCost) {
-      return { damage: 0, kiGained: 0, skipped: true };
+      return { damage: 0, kiGained: 0, skipped: true, healed: 0 };
     }
 
     this.state.currentKi -= action.kiCost;
 
     let damage = 0;
     let kiGained = 0;
+    let healed = 0;
 
     switch (action.type) {
       case 'ki_gather':
@@ -368,20 +485,37 @@ export class Enemy {
       case 'attack_s':
       case 'attack_l':
       case 'special':
+      case 'attack_pierce':
         damage = action.damage ?? 0;
         break;
       case 'defend':
         break;
+      case 'regenerate':
+        // Phase 3-2: 재생집중 - 강한 공격이 없었으면 HP +2
+        if (!this.state.regenerationCancelled) {
+          healed = 2;
+          this.state.currentHp = Math.min(this.state.maxHp, this.state.currentHp + healed);
+        }
+        break;
+      case 'command':
+        // Phase 3-3: 명령 하달 - commandActive 설정
+        this.state.commandActive = true;
+        break;
     }
 
-    return { damage, kiGained, skipped: false };
+    return { damage, kiGained, skipped: false, healed };
   }
 
-  /** 플레이어가 기 강탈 - 실제로 빼앗긴 기 반환 */
+  /** 기 강탈 */
   stealKi(amount: number): number {
     const stolen = Math.min(this.state.currentKi, amount);
     this.state.currentKi -= stolen;
     return stolen;
+  }
+
+  /** Phase 3-1: 기 충전 (무한의 망토 패시브용) */
+  addKi(amount: number): void {
+    this.state.currentKi = Math.min(this.state.maxKi, this.state.currentKi + amount);
   }
 
   /** 표식 추가 */
@@ -389,18 +523,28 @@ export class Enemy {
     this.state.mark = Math.max(0, this.state.mark + amount);
   }
 
-  /** 표식 1 소비 - 소비 전 중첩 수 반환 */
+  /** 표식 1 소비 */
   consumeMark(): number {
     const m = this.state.mark;
     if (m > 0) this.state.mark = Math.max(0, this.state.mark - 1);
     return m;
   }
 
-  /** 보스 재생 (1/턴) */
+  /** 보스 재생 (1/턴) - Phase 3-1 패시브 신진대사 재생 */
   regenerate(): void {
-    if (this.state.type === 'boss') {
+    if (this.state.type === 'boss' && this.state.passives.includes('regenerate_passive')) {
       this.state.currentHp = Math.min(this.state.maxHp, this.state.currentHp + 1);
     }
+  }
+
+  /** Phase 3-2: 재생집중 효과 취소 */
+  cancelRegeneration(): void {
+    this.state.regenerationCancelled = true;
+  }
+
+  /** Phase 3-3: 명령 하달 무효화 */
+  cancelCommand(): void {
+    this.state.commandActive = false;
   }
 
   /** 피해 받기 */
@@ -426,6 +570,12 @@ export class Enemy {
   get availableSkills(): EnemyAction[] { return this.state.availableSkills; }
   get mark(): number { return this.state.mark; }
   get patternIndex(): number { return this.state.patternIndex; }
+  /** Phase 3-1: 패시브 목록 */
+  get passives(): EnemyPassiveId[] { return this.state.passives; }
+  /** Phase 3-3: 명령 활성 여부 */
+  get commandActive(): boolean { return this.state.commandActive; }
+  /** Phase 3-2: 재생 취소 여부 */
+  get regenerationCancelled(): boolean { return this.state.regenerationCancelled; }
 
   getState(): Readonly<EnemyState> {
     return { ...this.state };
