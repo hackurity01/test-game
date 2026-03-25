@@ -64,21 +64,35 @@ export class KiGauge {
     }
   }
 
-  /** 기 수치 업데이트 */
+  /** 기 수치 업데이트
+   * Phase 4-2: 최대치일 때 게이지 색상을 주황색으로 변경 */
   update(currentKi: number): void {
+    // 오버차지 여부 판단: 기가 최대치면 주황색
+    const isOvercharge = currentKi >= this.maxKi;
+    const displayColor = isOvercharge ? 0xff8800 : this.color;
+
     for (let i = 0; i < this.segments.length; i++) {
       // 채워진 정도에 따라 세그먼트 표시
       if (i < currentKi) {
         this.segments[i].setAlpha(1);
-        this.segments[i].setFillStyle(this.color);
+        this.segments[i].setFillStyle(displayColor);
       } else {
         this.segments[i].setAlpha(0.15); // 빈 세그먼트는 흐리게
+        this.segments[i].setFillStyle(this.color); // 빈 세그먼트는 원래 색상
       }
     }
 
-    // 라벨에 수치 표시
+    // 라벨에 수치 표시 (오버차지 시 느낌표 표시)
     const labelBase = this.labelText.text.split(':')[0];
-    this.labelText.setText(`${labelBase}: ${currentKi}/${this.maxKi}`);
+    const overchargeIndicator = isOvercharge ? ' ⚡' : '';
+    this.labelText.setText(`${labelBase}: ${currentKi}/${this.maxKi}${overchargeIndicator}`);
+
+    // 오버차지 시 라벨 색상도 주황색으로
+    if (isOvercharge) {
+      this.labelText.setColor('#ff8800');
+    } else {
+      this.labelText.setColor('#aaaaaa');
+    }
   }
 
   /** 기 부족 시 빨간 깜빡임 효과 */

@@ -1,5 +1,6 @@
 // 핵심 전투 씬 - 3슬롯 배치 전투 시스템
 // Phase 3: 피콜로 패시브, 재생집중 취약, 레드리본 대령, 패시브/적 정보 UI
+// Phase 4: 기 고갈 패널티, 오버차지 방지, 배틀 로그 UI
 
 import Phaser from 'phaser';
 import { GameState } from '../game/GameState';
@@ -9,6 +10,7 @@ import { SkillSystem } from '../game/SkillSystem';
 import { CardUI } from '../ui/CardUI';
 import { SlotUI } from '../ui/SlotUI';
 import { KiGauge } from '../ui/KiGauge';
+import { BattleLogUI } from '../ui/BattleLogUI';
 
 /** 전투 단계 */
 type BattlePhase =
@@ -52,6 +54,11 @@ const LAYOUT = {
   // Phase 3-4: 패시브 패널 (좌하단)
   PASSIVE_PANEL_X: 20,
   PASSIVE_PANEL_Y: 840,
+
+  // Phase 4-3: 배틀 로그 패널 (우측)
+  BATTLE_LOG_X: 1380,
+  BATTLE_LOG_Y: 270,
+  BATTLE_LOG_WIDTH: 210,
 
   CENTER_X: 800,
   SLOT1_X: 500,
@@ -134,6 +141,9 @@ export class BattleScene extends Phaser.Scene {
   private executeBtn!: Phaser.GameObjects.Text;
   private executeBtnBg!: Phaser.GameObjects.Rectangle;
 
+  // Phase 4-3: 배틀 로그 UI
+  private battleLogUI!: BattleLogUI;
+
   /** 적 슬롯별 텔레그래프 텍스트 */
   private enemyTelegraphTexts: Phaser.GameObjects.Text[] = [];
 
@@ -214,6 +224,7 @@ export class BattleScene extends Phaser.Scene {
     this.createBottomArea(width, height);
     this.createPassivePanel();       // Phase 3-4
     this.createPiccoloRegenText();   // Phase 3-1
+    this.createBattleLogUI();        // Phase 4-3
 
     this.updateHpDisplays();
     this.updateKiGauges();
@@ -432,6 +443,18 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /**
+   * Phase 4-3: 배틀 로그 UI 생성 (화면 우측)
+   */
+  private createBattleLogUI(): void {
+    this.battleLogUI = new BattleLogUI({
+      scene: this,
+      x: LAYOUT.BATTLE_LOG_X,
+      y: LAYOUT.BATTLE_LOG_Y,
+      width: LAYOUT.BATTLE_LOG_WIDTH,
+    });
+  }
+
+  /**
    * Phase 3-4: 플레이어 패시브 패널 생성 (화면 좌하단)
    */
   private createPassivePanel(): void {
@@ -595,6 +618,8 @@ export class BattleScene extends Phaser.Scene {
     this.gameState.player.onTurnStart();
     this.renderHand();
     this.setPhase('placement');
+    // Phase 4-1: 드로우 후 기 부족 카드 반투명 처리
+    this.updateCardAffordability();
   }
 
   private renderHand(): void {
@@ -644,7 +669,7 @@ export class BattleScene extends Phaser.Scene {
     if (this.phase !== 'placement') return;
 
     if (!this.canSelectCard(card)) {
-      this.addLog(`✗ ${card.data.name}: 사용 횟수 소진!`);
+      this.addBattleLog(`✗ ${card.data.name}: 사용 횟수 소진!`);
       return;
     }
 
@@ -666,23 +691,34 @@ export class BattleScene extends Phaser.Scene {
 
   private placeCardInSlot(card: CardInstance, slotIndex: number): void {
     const slot = this.playerSlots[slotIndex];
+
+    // Phase 4-1: 기 소모 스킬(kiCost > 0)이고 현재 기가 0이면 배치 불가
+    if (card.data.kiCost > 0 && this.gameState.player.ki === 0) {
+      this.addBattleLog(`⚠️ 기 부족! [${card.data.name}] 배치 불가`);
+      this.showSlotNotification(slotIndex, '기 부족!', '#ff4444');
+      // 선택 해제
+      this.selectedCard = null;
+      this.handCards.forEach(c => c.setSelected(false));
+      return;
+    }
+
     if (!slot.isEmpty()) {
       const existingCard = slot.removeCard();
       if (existingCard) {
-        this.addLog(`슬롯 ${slotIndex + 1}: ${existingCard.data.name} 제거됨`);
+        this.addBattleLog(`슬롯 ${slotIndex + 1}: ${existingCard.data.name} 제거됨`);
       }
     }
     slot.placeCard(card);
     this.selectedCard = null;
     this.handCards.forEach(c => c.setSelected(false));
-    this.addLog(`슬롯 ${slotIndex + 1}: [${card.data.name}] 배치`);
+    this.addBattleLog(`슬롯 ${slotIndex + 1}: [${card.data.name}] 배치`);
 
     if (card.data.id === 'sense') {
       this.senseActive = true;
       this.revealEnemySlot(0, this.enemy.intent.action1);
       this.revealEnemySlot(1, this.enemy.intent.action2);
       this.revealEnemySlot(2, this.enemy.intent.action3);
-      this.addLog('🔍 [감지]: 적 3슬롯 전체 공개! (이번 턴 슬롯 2개 제한)');
+      this.addBattleLog('🔍 [감지]: 적 3슬롯 전체 공개! (이번 턴 슬롯 2개 제한)');
     }
 
     if (card.data.id === 'scout') {
@@ -690,7 +726,7 @@ export class BattleScene extends Phaser.Scene {
       if (nextSlotIdx < SLOT_COUNT) {
         const actions = [this.enemy.intent.action1, this.enemy.intent.action2, this.enemy.intent.action3];
         this.revealEnemySlot(nextSlotIdx, actions[nextSlotIdx]);
-        this.addLog(`👁 [눈치보기]: 적 슬롯 ${nextSlotIdx + 1} 행동 공개!`);
+        this.addBattleLog(`👁 [눈치보기]: 적 슬롯 ${nextSlotIdx + 1} 행동 공개!`);
       }
     }
 
@@ -722,12 +758,14 @@ export class BattleScene extends Phaser.Scene {
     const slot = this.playerSlots[slotIndex];
     const removed = slot.removeCard();
     if (removed) {
-      this.addLog(`슬롯 ${slotIndex + 1}: ${removed.data.name} 제거됨`);
+      this.addBattleLog(`슬롯 ${slotIndex + 1}: ${removed.data.name} 제거됨`);
     }
     if (removed?.data.id === 'sense') {
       this.senseActive = false;
     }
     this.updateChainHints();
+    // Phase 4-1: 카드 상태(반투명) 즉시 업데이트
+    this.updateCardAffordability();
   }
 
   private async onExecuteClicked(): Promise<void> {
@@ -736,13 +774,13 @@ export class BattleScene extends Phaser.Scene {
     const maxSlots = this.getMaxSlotCount();
     const hasAnyCard = this.playerSlots.slice(0, maxSlots).some(s => !s.isEmpty());
     if (!hasAnyCard) {
-      this.addLog('❌ 슬롯에 카드를 배치하세요!');
+      this.addBattleLog('❌ 슬롯에 카드를 배치하세요!');
       return;
     }
 
     if (this.senseActive && !this.playerSlots[2].isEmpty()) {
       this.playerSlots[2].removeCard();
-      this.addLog('🔍 감지 효과: 슬롯 3 사용 불가 (제거됨)');
+      this.addBattleLog('🔍 감지 효과: 슬롯 3 사용 불가 (제거됨)');
     }
 
     this.setPhase('executing');
@@ -750,7 +788,7 @@ export class BattleScene extends Phaser.Scene {
     // Phase 3-1: 피콜로 패시브 신진대사 재생 (1/턴)
     if (this.enemy.type === 'boss' && this.enemy.passives.includes('regenerate_passive')) {
       this.enemy.regenerate();
-      this.addLog('💚 [신진대사 재생] 피콜로 HP +1!');
+      this.addBattleLog('💚 [신진대사 재생] 피콜로 HP +1!');
       this.updateHpDisplays();
     }
 
@@ -806,7 +844,7 @@ export class BattleScene extends Phaser.Scene {
     const intentActions = [this.enemy.intent.action1, this.enemy.intent.action2, this.enemy.intent.action3];
     const enemyAction = intentActions[slotIndex];
 
-    this.addLog(`── 슬롯 ${slotIndex + 1} 대결 ──`);
+    this.addBattleLog(`── 슬롯 ${slotIndex + 1} 대결 ──`);
     playerSlot.setHighlight(true);
 
     // 슬롯 시작 시 막기/회피 상태 초기화
@@ -828,7 +866,7 @@ export class BattleScene extends Phaser.Scene {
         chainBonus = calcChainBonus(prevTags, currTags, playerCard.data.effect.type);
         const hintText = buildChainHintText(chainBonus);
         if (hintText) {
-          this.addLog(`🔗 연계 발동! ${hintText}`);
+          this.addBattleLog(`🔗 연계 발동! ${hintText}`);
         }
       }
     }
@@ -854,10 +892,10 @@ export class BattleScene extends Phaser.Scene {
 
     if (playerCard) {
       if (playerCard.usesLeft !== null && playerCard.usesLeft <= 0) {
-        this.addLog(`❌ [${playerCard.data.name}]: 사용 횟수 소진 → 무효`);
+        this.addBattleLog(`❌ [${playerCard.data.name}]: 사용 횟수 소진 → 무효`);
         await playerSlot.flashInsufficientKi();
       } else if (!this.gameState.player.hasEnoughKi(playerKiCost)) {
-        this.addLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효 (필요: ${playerKiCost})`);
+        this.addBattleLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효 (필요: ${playerKiCost})`);
         await playerSlot.flashInsufficientKi();
       } else {
         playerCardValid = true;
@@ -963,7 +1001,7 @@ export class BattleScene extends Phaser.Scene {
     }
 
     if (!this.gameState.player.hasEnoughKi(actualKiCost)) {
-      this.addLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효`);
+      this.addBattleLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효`);
       await playerSlot.flashInsufficientKi();
       await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, 'none', false, false, false);
       return;
@@ -974,71 +1012,71 @@ export class BattleScene extends Phaser.Scene {
     this.updateKiGauges();
 
     if (!conditionMet) {
-      this.addLog(`⚪ [${playerCard.data.name}]: 조건 불충족 → 효과 없음`);
+      this.addBattleLog(`⚪ [${playerCard.data.name}]: 조건 불충족 → 효과 없음`);
       await playerSlot.flashExecuted();
       await this.executeEnemyAction(enemyAction, enemyBattleType, slotIndex, 'none', false, false, false);
       return;
     }
 
-    this.addLog(`⚡ [${playerCard.data.name}]: 반응 발동!`);
+    this.addBattleLog(`⚡ [${playerCard.data.name}]: 반응 발동!`);
 
     switch (effectType) {
       case 'counter': {
         const counterDmg = playerCard.data.effect.value;
-        this.addLog(`🥊 [카운터 자세]: 적 공격 경감(-2) + 반격 ${counterDmg}뎀`);
+        this.addBattleLog(`🥊 [카운터 자세]: 적 공격 경감(-2) + 반격 ${counterDmg}뎀`);
         const enemyResult = this.enemy.executeAction(enemyAction);
         if (!enemyResult.skipped && enemyResult.damage > 0) {
           const reducedDmg = Math.max(0, enemyResult.damage - 2);
           if (reducedDmg > 0) {
             const actualDmg = this.gameState.player.takeDamage(reducedDmg);
             this.gameState.recordDamageTaken(actualDmg);
-            this.addLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해 (경감 적용)`);
+            this.addBattleLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해 (경감 적용)`);
             await this.showDamageEffect(true, actualDmg);
           } else {
-            this.addLog(`🛡️ 카운터 자세로 피해 완전 경감!`);
+            this.addBattleLog(`🛡️ 카운터 자세로 피해 완전 경감!`);
           }
         }
         this.updateKiGauges();
         const counterActual = this.enemy.takeDamage(counterDmg);
         this.gameState.recordDamageDealt(counterActual);
-        this.addLog(`⚡ 반격: 적에게 ${counterActual} 피해!`);
+        this.addBattleLog(`⚡ 반격: 적에게 ${counterActual} 피해!`);
         await this.showDamageEffect(false, counterActual);
         break;
       }
 
       case 'ki_block': {
         const blockAmt = playerCard.data.effect.value;
-        this.addLog(`🔰 [기 보호막]: 적 기+${blockAmt} 차단`);
+        this.addBattleLog(`🔰 [기 보호막]: 적 기+${blockAmt} 차단`);
         const enemyResult = this.enemy.executeAction(enemyAction);
         if (!enemyResult.skipped && enemyResult.kiGained > 0) {
           const blocked = Math.min(enemyResult.kiGained, blockAmt);
           this.enemy.stealKi(blocked);
-          this.addLog(`🔰 적 기 +${enemyResult.kiGained} → ${blocked} 차단됨`);
+          this.addBattleLog(`🔰 적 기 +${enemyResult.kiGained} → ${blocked} 차단됨`);
         }
         this.updateKiGauges();
         this.kiShieldNextSlotBonus = 1;
-        this.addLog(`🔰 다음 슬롯 기소모 -1 적용 예약`);
+        this.addBattleLog(`🔰 다음 슬롯 기소모 -1 적용 예약`);
         break;
       }
 
       case 'ambush': {
         const ambushDmg = playerCard.data.effect.value;
-        this.addLog(`🗡️ [잠복 반격]: 적 막기 무효 + 관통 ${ambushDmg}뎀`);
+        this.addBattleLog(`🗡️ [잠복 반격]: 적 막기 무효 + 관통 ${ambushDmg}뎀`);
         this.enemy.executeAction(enemyAction);
         this.updateKiGauges();
         const ambushActual = this.enemy.takeDamage(ambushDmg);
         this.gameState.recordDamageDealt(ambushActual);
-        this.addLog(`⚡ 관통 피해: 적에게 ${ambushActual} 피해!`);
+        this.addBattleLog(`⚡ 관통 피해: 적에게 ${ambushActual} 피해!`);
         await this.showDamageEffect(false, ambushActual);
         break;
       }
 
       case 'react_dodge': {
-        this.addLog(`💨 [반응 순간이동]: 에너지 공격 자동 회피!`);
+        this.addBattleLog(`💨 [반응 순간이동]: 에너지 공격 자동 회피!`);
         const enemyResult = this.enemy.executeAction(enemyAction);
         this.updateKiGauges();
         if (enemyResult.damage > 0) {
-          this.addLog(`💨 적 [${enemyAction.name}] 회피 성공! (${enemyResult.damage}뎀 무효)`);
+          this.addBattleLog(`💨 적 [${enemyAction.name}] 회피 성공! (${enemyResult.damage}뎀 무효)`);
         }
         break;
       }
@@ -1074,8 +1112,18 @@ export class BattleScene extends Phaser.Scene {
 
     switch (playerBattleType) {
       case 'ki_gather': {
+        // Phase 4-2: 기가 이미 최대치면 오버차지 경고
+        const isAtMax = this.gameState.player.ki >= this.gameState.player.maxKi;
+        if (isAtMax) {
+          this.addBattleLog('🔋 기 과부하! 기모으기 실패');
+          this.showSlotNotification(slotIndex, '기 과부하!', '#ff8800');
+          await playerSlot.flashExecuted();
+          // 오버차지 시 Ki게이지 업데이트 (주황색 표시)
+          this.updateKiGauges();
+          break;
+        }
         const gained = this.gameState.player.gainKi(playerCard.data.effect.value);
-        this.addLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
+        this.addBattleLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
         await playerSlot.flashExecuted();
 
         const enemyEffective = (enemyBattleType === 'attack') && !enemyAttackMissed;
@@ -1085,7 +1133,7 @@ export class BattleScene extends Phaser.Scene {
             context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
           });
           for (const r of results) {
-            if (r.message) this.addLog(r.message);
+            if (r.message) this.addBattleLog(r.message);
           }
         } else {
           const results = this.skillSystem.trigger({
@@ -1094,7 +1142,7 @@ export class BattleScene extends Phaser.Scene {
           });
           for (const r of results) {
             if (r.message) {
-              this.addLog(r.message);
+              this.addBattleLog(r.message);
               // Phase 3-4: 명상 패시브 발동 번쩍임
               if (r.passiveId === 'passive_meditate') this.flashPassiveText('passive_meditate');
             }
@@ -1108,22 +1156,22 @@ export class BattleScene extends Phaser.Scene {
       case 'defend': {
         const isDodge = playerCard.data.effect.type === 'dodge';
         if (dodgeForceFail && isDodge) {
-          this.addLog(`❌ [${playerCard.data.name}]: 이미 공격받아 순간이동 불가!`);
+          this.addBattleLog(`❌ [${playerCard.data.name}]: 이미 공격받아 순간이동 불가!`);
         } else if (isDodge) {
           this.gameState.player.setDodging(true);
           if (enemyAttackMissed) {
-            this.addLog(`💨 [${playerCard.data.name}]: 선공 순간이동 → 적 공격 회피!`);
+            this.addBattleLog(`💨 [${playerCard.data.name}]: 선공 순간이동 → 적 공격 회피!`);
           } else {
-            this.addLog(`💨 [${playerCard.data.name}]: 회피 준비!`);
+            this.addBattleLog(`💨 [${playerCard.data.name}]: 회피 준비!`);
           }
         } else {
           this.gameState.player.setBlocking(true);
-          this.addLog(`🛡️ [${playerCard.data.name}]: 막기 준비!`);
+          this.addBattleLog(`🛡️ [${playerCard.data.name}]: 막기 준비!`);
 
           // Phase 3-1: 피콜로 무한의 망토 패시브 처리
           if (this.enemy.type === 'boss' && this.enemy.passives.includes('infinite_cloak')) {
             this.enemy.addKi(1);
-            this.addLog('🌀 [무한의 망토] 발동! 적 기+1');
+            this.addBattleLog('🌀 [무한의 망토] 발동! 적 기+1');
             this.updateKiGauges();
             this.flashEnemySlotBg(slotIndex, 0x8800ff);
           }
@@ -1138,7 +1186,7 @@ export class BattleScene extends Phaser.Scene {
           });
           for (const r of results) {
             if (r.message) {
-              this.addLog(r.message);
+              this.addBattleLog(r.message);
               // Phase 3-4: 패링 패시브 발동 번쩍임
               if (r.passiveId === 'passive_parry') this.flashPassiveText('passive_parry');
             }
@@ -1152,7 +1200,7 @@ export class BattleScene extends Phaser.Scene {
       case 'mark': {
         const markVal = playerCard.data.effect.value;
         this.enemy.addMark(markVal);
-        this.addLog(`🎯 [${playerCard.data.name}]: 적에게 표식 +${markVal} (누적: ${this.enemy.mark})`);
+        this.addBattleLog(`🎯 [${playerCard.data.name}]: 적에게 표식 +${markVal} (누적: ${this.enemy.mark})`);
         await playerSlot.flashExecuted();
         break;
       }
@@ -1160,19 +1208,19 @@ export class BattleScene extends Phaser.Scene {
       case 'steal': {
         const enemyAttacking = (enemyBattleType === 'attack') && !enemyAttackMissed;
         if (enemyAttacking) {
-          this.addLog(`❌ [${playerCard.data.name}]: 공격받아 강탈 실패!`);
+          this.addBattleLog(`❌ [${playerCard.data.name}]: 공격받아 강탈 실패!`);
         } else {
           const stolen = this.enemy.stealKi(playerCard.data.effect.value);
           if (stolen > 0) {
             this.gameState.player.gainKi(stolen);
-            this.addLog(`💰 [${playerCard.data.name}]: 적에게서 기 ${stolen} 강탈!`);
+            this.addBattleLog(`💰 [${playerCard.data.name}]: 적에게서 기 ${stolen} 강탈!`);
             // Phase 3-3: 강탈로 명령 무효화
             if (this.enemy.commandActive) {
               this.enemy.cancelCommand();
-              this.addLog('💰 강탈로 레드리본 대령의 명령 무효화!');
+              this.addBattleLog('💰 강탈로 레드리본 대령의 명령 무효화!');
             }
           } else {
-            this.addLog(`💰 [${playerCard.data.name}]: 강탈했지만 적의 기가 없었다.`);
+            this.addBattleLog(`💰 [${playerCard.data.name}]: 강탈했지만 적의 기가 없었다.`);
           }
           this.updateKiGauges();
         }
@@ -1188,16 +1236,16 @@ export class BattleScene extends Phaser.Scene {
           const attackPower = playerCard.data.effect.value + bonus.damageBonus;
           if (attackPower >= 3) {
             this.enemy.cancelRegeneration();
-            this.addLog('⚡ 강한 공격으로 피콜로 재생 효과 무효화!');
+            this.addBattleLog('⚡ 강한 공격으로 피콜로 재생 효과 무효화!');
           }
         }
 
         if (blockedByEnemy) {
-          this.addLog(`🛡️ 적이 막기로 [${playerCard.data.name}]을 막았다!`);
+          this.addBattleLog(`🛡️ 적이 막기로 [${playerCard.data.name}]을 막았다!`);
           await playerSlot.flashExecuted();
         } else {
           if (bonus.bypassDefend && enemyBattleType === 'defend') {
-            this.addLog(`👟 MOVE 연계: 적 막기 관통!`);
+            this.addBattleLog(`👟 MOVE 연계: 적 막기 관통!`);
           }
           await this.applyAttackEffect(playerCard, playerSlot, bonus);
         }
@@ -1207,23 +1255,23 @@ export class BattleScene extends Phaser.Scene {
       case 'swap_next': {
         const enemyAttacking = (enemyBattleType === 'attack') && !enemyAttackMissed;
         if (enemyAttacking) {
-          this.addLog(`❌ [${playerCard.data.name}]: 공격받아 눈치보기 실패!`);
+          this.addBattleLog(`❌ [${playerCard.data.name}]: 공격받아 눈치보기 실패!`);
         } else {
           const nextIdx = slotIndex + 1;
           if (nextIdx < SLOT_COUNT) {
             const nextActions = [this.enemy.intent.action1, this.enemy.intent.action2, this.enemy.intent.action3];
             this.revealEnemySlot(nextIdx, nextActions[nextIdx]);
-            this.addLog(`👁 [눈치보기]: 적 슬롯 ${nextIdx + 1} 공개! 다음 슬롯 교체 가능.`);
+            this.addBattleLog(`👁 [눈치보기]: 적 슬롯 ${nextIdx + 1} 공개! 다음 슬롯 교체 가능.`);
             if (!this.playerSlots[nextIdx].isEmpty()) {
               const removed = this.playerSlots[nextIdx].removeCard();
               if (removed) {
-                this.addLog(`슬롯 ${nextIdx + 1}: ${removed.data.name} 제거 (교체 가능)`);
+                this.addBattleLog(`슬롯 ${nextIdx + 1}: ${removed.data.name} 제거 (교체 가능)`);
               }
             }
             // Phase 3-3: 눈치보기로 명령 무효화
             if (this.enemy.commandActive) {
               this.enemy.cancelCommand();
-              this.addLog('👁 감지로 레드리본 대령의 명령 무효화!');
+              this.addBattleLog('👁 감지로 레드리본 대령의 명령 무효화!');
             }
           }
         }
@@ -1232,11 +1280,11 @@ export class BattleScene extends Phaser.Scene {
       }
 
       case 'reveal_all': {
-        this.addLog(`🔍 [감지]: 적 전략 분석 완료`);
+        this.addBattleLog(`🔍 [감지]: 적 전략 분석 완료`);
         // Phase 3-3: 감지로 명령 무효화
         if (this.enemy.commandActive) {
           this.enemy.cancelCommand();
-          this.addLog('🔍 감지로 레드리본 대령의 명령 무효화!');
+          this.addBattleLog('🔍 감지로 레드리본 대령의 명령 무효화!');
         }
         await playerSlot.flashExecuted();
         break;
@@ -1262,22 +1310,22 @@ export class BattleScene extends Phaser.Scene {
     const enemyResult = this.enemy.executeAction(enemyAction);
 
     if (enemyResult.skipped) {
-      this.addLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`);
+      this.addBattleLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`);
       this.flashEnemySlotBg(slotIndex, 0x880000);
       return;
     }
 
     if (enemyResult.kiGained > 0) {
-      this.addLog(`⚡ 적 기모으기: +${enemyResult.kiGained}`);
+      this.addBattleLog(`⚡ 적 기모으기: +${enemyResult.kiGained}`);
     }
     this.updateKiGauges();
 
     // Phase 3-2: 재생집중 처리
     if (enemyBattleType === 'regenerate') {
       if (this.enemy.regenerationCancelled) {
-        this.addLog('💔 [재생집중] 강한 공격으로 재생 무효화됨!');
+        this.addBattleLog('💔 [재생집중] 강한 공격으로 재생 무효화됨!');
       } else {
-        this.addLog(`💚 [재생집중] 피콜로 HP +2 회복!`);
+        this.addBattleLog(`💚 [재생집중] 피콜로 HP +2 회복!`);
         this.updateHpDisplays();
       }
       return;
@@ -1286,9 +1334,9 @@ export class BattleScene extends Phaser.Scene {
     // Phase 3-3: 명령 하달 처리
     if (enemyBattleType === 'command') {
       if (this.enemy.commandActive) {
-        this.addLog('📢 [명령 하달] 다음 슬롯 공격에 관통 속성 부여!');
+        this.addBattleLog('📢 [명령 하달] 다음 슬롯 공격에 관통 속성 부여!');
       } else {
-        this.addLog('📢 [명령 하달] 명령이 무효화되었다!');
+        this.addBattleLog('📢 [명령 하달] 명령이 무효화되었다!');
       }
       return;
     }
@@ -1302,14 +1350,14 @@ export class BattleScene extends Phaser.Scene {
       const isPierce = enemyAction.type === 'attack_pierce' && this.enemy.commandActive;
 
       if (playerDodging) {
-        this.addLog(`💨 순간이동으로 [${enemyAction.name}] 회피!`);
+        this.addBattleLog(`💨 순간이동으로 [${enemyAction.name}] 회피!`);
         // 명령 소비
         if (isPierce) this.enemy.cancelCommand();
       } else if (playerBlocking && !isPierce) {
-        this.addLog(`🛡️ 막기로 [${enemyAction.name}] 상쇄!`);
+        this.addBattleLog(`🛡️ 막기로 [${enemyAction.name}] 상쇄!`);
       } else {
         if (isPierce && playerBlocking) {
-          this.addLog(`⚔️ [관통 공격] 막기를 무시하고 관통!`);
+          this.addBattleLog(`⚔️ [관통 공격] 막기를 무시하고 관통!`);
           this.enemy.cancelCommand(); // 명령 효과 소비
         }
 
@@ -1327,11 +1375,11 @@ export class BattleScene extends Phaser.Scene {
 
         const actualDmg = this.gameState.player.takeDamage(finalDamage);
         this.gameState.recordDamageTaken(actualDmg);
-        this.addLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해!`);
+        this.addBattleLog(`💥 적 [${enemyAction.name}]: ${actualDmg} 피해!`);
         if (actualDmg > 0) await this.showDamageEffect(true, actualDmg);
       }
     } else if ((enemyBattleType === 'attack') && enemyAttackMissed) {
-      this.addLog(`💨 [${enemyAction.name}] 빗나감! (순간이동 회피)`);
+      this.addBattleLog(`💨 [${enemyAction.name}] 빗나감! (순간이동 회피)`);
     }
   }
 
@@ -1350,7 +1398,7 @@ export class BattleScene extends Phaser.Scene {
     actualKiCost?: number,
     chainBonus?: ChainBonus
   ): Promise<void> {
-    this.addLog('⚡ 동시 발동!');
+    this.addBattleLog('⚡ 동시 발동!');
 
     await this.executePlayerAction(
       playerCard, playerCardValid, playerBattleType as any,
@@ -1393,9 +1441,9 @@ export class BattleScene extends Phaser.Scene {
       this.gameState.recordDamageDealt(dmg);
 
       if (logParts.length > 0) {
-        this.addLog(`🔗 ${logParts.join(' ')} → ${baseDmg}+${bonusDmg}=${totalBeforeMark} × ${totalMarkMultiplier} = ${dmg}뎀`);
+        this.addBattleLog(`🔗 ${logParts.join(' ')} → ${baseDmg}+${bonusDmg}=${totalBeforeMark} × ${totalMarkMultiplier} = ${dmg}뎀`);
       } else {
-        this.addLog(`⚡ [${card.data.name}]: 적에게 ${dmg} 피해!`);
+        this.addBattleLog(`⚡ [${card.data.name}]: 적에게 ${dmg} 피해!`);
       }
       await this.showDamageEffect(false, dmg);
 
@@ -1416,7 +1464,7 @@ export class BattleScene extends Phaser.Scene {
 
   private checkBattleResult(): void {
     if (this.enemy.isDead()) {
-      this.addLog('🎉 적을 쓰러뜨렸다!');
+      this.addBattleLog('🎉 적을 쓰러뜨렸다!');
       this.setPhase('result');
 
       this.time.delayedCall(800, () => {
@@ -1431,7 +1479,7 @@ export class BattleScene extends Phaser.Scene {
         }
       });
     } else if (this.gameState.player.isDead()) {
-      this.addLog('💀 패배했다...');
+      this.addBattleLog('💀 패배했다...');
       this.setPhase('result');
 
       this.time.delayedCall(800, () => {
@@ -1492,16 +1540,17 @@ export class BattleScene extends Phaser.Scene {
   private updateKiGauges(): void {
     this.playerKiGauge.update(this.gameState.player.ki);
     this.enemyKiGauge.update(this.enemy.ki);
+    // Phase 4-1: 기 변화 시 카드 어포더빌리티 실시간 갱신
+    if (this.phase === 'placement') {
+      this.updateCardAffordability();
+    }
   }
 
   private updateAllUI(): void {
     this.updateHpDisplays();
     this.updateKiGauges();
-
-    this.handCards.forEach(cardUI => {
-      const canSelect = cardUI.card.usesLeft === null || cardUI.card.usesLeft > 0;
-      cardUI.setEnabled(canSelect);
-    });
+    // Phase 4-1: 기 부족 카드 반투명 처리 포함
+    this.updateCardAffordability();
   }
 
   private updateTelegraphTexts(): void {
@@ -1612,12 +1661,80 @@ export class BattleScene extends Phaser.Scene {
     });
   }
 
-  private addLog(message: string): void {
+  /**
+   * Phase 4-3: 배틀 로그 추가 헬퍼
+   * 기존 하단 logText와 우측 BattleLogUI 모두 업데이트
+   */
+  private addBattleLog(message: string): void {
     this.battleLog.push(message);
     if (this.battleLog.length > 4) {
       this.battleLog.shift();
     }
-    this.logText.setText(this.battleLog.join('  |  '));
+    // 하단 logText (기존 유지)
+    if (this.logText) {
+      this.logText.setText(this.battleLog.join('  |  '));
+    }
+    // 우측 배틀 로그 UI (Phase 4-3)
+    if (this.battleLogUI) {
+      this.battleLogUI.addEntry(message);
+    }
+  }
+
+  /** @deprecated addBattleLog 사용 권장 */
+  private addLog(message: string): void {
+    this.addBattleLog(message);
+  }
+
+  /**
+   * Phase 4-1/4-2: 슬롯 위에 알림 텍스트 표시 (0.7초 후 사라짐)
+   * @param slotIndex 슬롯 인덱스 (0~2)
+   * @param message 표시할 메시지
+   * @param color 텍스트 색상 (예: '#ff4444')
+   */
+  private showSlotNotification(slotIndex: number, message: string, color: string): void {
+    const x = SLOT_X_POSITIONS[slotIndex];
+    const y = LAYOUT.PLAYER_SLOTS_Y - 60;
+
+    const txt = this.add.text(x, y, message, {
+      fontSize: '18px',
+      color,
+      fontFamily: 'Arial',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 0.5).setDepth(100);
+
+    this.tweens.add({
+      targets: txt,
+      y: y - 30,
+      alpha: 0,
+      duration: 700,
+      ease: 'Power2',
+      onComplete: () => txt.destroy(),
+    });
+  }
+
+  /**
+   * Phase 4-1: 핸드 카드 중 기 부족한 카드를 반투명 처리
+   * updateAllUI 내에서 호출됨
+   */
+  private updateCardAffordability(): void {
+    const currentKi = this.gameState.player.ki;
+    this.handCards.forEach(cardUI => {
+      const card = cardUI.card;
+      const usable = (card.usesLeft === null || card.usesLeft > 0);
+      // 기 소모 스킬이고 현재 기가 부족하면 반투명
+      const canAfford = card.data.kiCost === 0 || currentKi >= card.data.kiCost;
+      if (usable && canAfford) {
+        cardUI.setEnabled(true);
+      } else if (usable && !canAfford) {
+        // 기 부족: 반투명 처리 (0.4 → 0.35로 더 눈에 띄게)
+        cardUI.setEnabled(false);
+      } else {
+        // 사용 횟수 소진
+        cardUI.setEnabled(false);
+      }
+    });
   }
 
   private wait(ms: number): Promise<void> {
