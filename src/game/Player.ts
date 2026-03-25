@@ -18,7 +18,7 @@ export class Player {
   constructor() {
     this.state = {
       maxHp: 20,
-      currentHp: 10,
+      currentHp: 20,
       maxKi: 5,
       currentKi: 0,
       isBlocking: false,
