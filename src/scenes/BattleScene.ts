@@ -395,11 +395,12 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private createBottomArea(width: number, height: number): void {
+    // 하단 로그 텍스트 제거됨 (우측 BattleLogUI로 통합)
     this.logText = this.add.text(width / 2, LAYOUT.LOG_Y, '', {
       fontSize: '11px', color: '#888888', fontFamily: 'Arial',
       align: 'center',
       wordWrap: { width: 900 },
-    }).setOrigin(0.5, 0.5);
+    }).setOrigin(0.5, 0.5).setVisible(false);
 
     this.executeBtnBg = this.add.rectangle(LAYOUT.EXECUTE_BTN_X, LAYOUT.EXECUTE_BTN_Y, 160, 36, 0x224422)
       .setStrokeStyle(2, 0x44cc44)
@@ -692,15 +693,7 @@ export class BattleScene extends Phaser.Scene {
   private placeCardInSlot(card: CardInstance, slotIndex: number): void {
     const slot = this.playerSlots[slotIndex];
 
-    // Phase 4-1: 기 소모 스킬(kiCost > 0)이고 현재 기가 0이면 배치 불가
-    if (card.data.kiCost > 0 && this.gameState.player.ki === 0) {
-      this.addBattleLog(`⚠️ 기 부족! [${card.data.name}] 배치 불가`);
-      this.showSlotNotification(slotIndex, '기 부족!', '#ff4444');
-      // 선택 해제
-      this.selectedCard = null;
-      this.handCards.forEach(c => c.setSelected(false));
-      return;
-    }
+    // 기 부족해도 배치 허용 (예측 배치). 실행 시점에 기 부족이면 무효 처리됨.
 
     if (!slot.isEmpty()) {
       const existingCard = slot.removeCard();
@@ -1719,21 +1712,11 @@ export class BattleScene extends Phaser.Scene {
    * updateAllUI 내에서 호출됨
    */
   private updateCardAffordability(): void {
-    const currentKi = this.gameState.player.ki;
     this.handCards.forEach(cardUI => {
       const card = cardUI.card;
       const usable = (card.usesLeft === null || card.usesLeft > 0);
-      // 기 소모 스킬이고 현재 기가 부족하면 반투명
-      const canAfford = card.data.kiCost === 0 || currentKi >= card.data.kiCost;
-      if (usable && canAfford) {
-        cardUI.setEnabled(true);
-      } else if (usable && !canAfford) {
-        // 기 부족: 반투명 처리 (0.4 → 0.35로 더 눈에 띄게)
-        cardUI.setEnabled(false);
-      } else {
-        // 사용 횟수 소진
-        cardUI.setEnabled(false);
-      }
+      // 사용 횟수 소진된 카드만 비활성화. 기 부족은 배치 허용 (예측 배치).
+      cardUI.setEnabled(usable);
     });
   }
 
