@@ -52,17 +52,23 @@ export class RewardScene extends Phaser.Scene {
     this.createSkipButton(width, height);
   }
 
-  /** 보상 카드 풀에서 랜덤 선택 */
+  /** 보상 카드 풀에서 랜덤 선택 (이미 보유한 스킬 제외) */
   private pickRewardCards(count: number): CardId[] {
-    const pool = [...REWARD_CARD_POOL];
+    // 현재 덱에 있는 카드 ID 목록
+    const ownedIds = new Set(
+      this.gameState.deck.getAllCards().map(c => c.data.id)
+    );
+
+    // 보유하지 않은 카드만 풀에 포함
+    const pool = REWARD_CARD_POOL.filter(id => !ownedIds.has(id));
     const result: CardId[] = [];
-    
+
     for (let i = 0; i < count && pool.length > 0; i++) {
       const index = Math.floor(Math.random() * pool.length);
       result.push(pool[index]);
-      pool.splice(index, 1); // 중복 제거
+      pool.splice(index, 1);
     }
-    
+
     return result;
   }
 
