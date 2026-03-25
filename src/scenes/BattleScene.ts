@@ -1391,6 +1391,55 @@ export class BattleScene extends Phaser.Scene {
     actualKiCost?: number,
     chainBonus?: ChainBonus
   ): Promise<void> {
+    // 양쪽이 모두 공격인 경우: 데미지 상쇄 처리
+    const playerIsAttack = playerCardValid && playerCard &&
+      (playerCard.data.effect.type === 'damage') && playerBattleType === 'attack';
+    const enemyIsAttack = enemyBattleType === 'attack' && (enemyAction.damage ?? 0) > 0;
+
+    if (playerIsAttack && enemyIsAttack) {
+      // 플레이어 공격력 계산
+      const bonus = chainBonus ?? NO_CHAIN;
+      const enemyMark = this.enemy.mark;
+      const baseMarkMultiplier = (1 + enemyMark) * bonus.markMultiplier;
+      const baseDmg = playerCard!.data.effect.value + bonus.damageBonus;
+      const playerDmg = Math.floor(baseDmg * baseMarkMultiplier);
+
+      // 적 공격력 계산
+      const enemyDmg = enemyAction.damage ?? 0;
+
+      // 상쇄 후 실제 데미지
+      const netPlayerDmg = Math.max(0, playerDmg - enemyDmg);
+      const netEnemyDmg = Math.max(0, enemyDmg - playerDmg);
+
+      this.addBattleLog(`⚡ 동시 공격! 내 ${playerDmg}뎀 vs 적 ${enemyDmg}뎀 → 상쇄 후 내 ${netPlayerDmg}뎀 / 적 ${netEnemyDmg}뎀`);
+
+      if (enemyMark > 0) this.enemy.consumeMark();
+
+      if (netPlayerDmg > 0) {
+        const dealt = this.enemy.takeDamage(netPlayerDmg);
+        this.gameState.recordDamageDealt(dealt);
+        await this.showDamageEffect(false, dealt);
+      }
+      if (netEnemyDmg > 0) {
+        const taken = this.gameState.player.takeDamage(netEnemyDmg);
+        await this.showDamageEffect(true, taken);
+      }
+
+      // ki 소모 처리
+      if (actualKiCost !== undefined && actualKiCost > 0) {
+        this.gameState.player.spendKi(actualKiCost);
+      }
+      const enemyResult = this.enemy.executeAction(enemyAction);
+      if (enemyResult.skipped) {
+        this.addBattleLog(`적 [${enemyAction.name}]: 기 부족으로 건너뜀`);
+      }
+
+      await playerSlot.flashExecuted();
+      this.updateKiGauges();
+      return;
+    }
+
+    // 그 외(공격+방어, 기모으기 등): 기존 순차 처리
     this.addBattleLog('⚡ 동시 발동!');
 
     await this.executePlayerAction(
