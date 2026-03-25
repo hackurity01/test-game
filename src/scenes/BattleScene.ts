@@ -932,15 +932,27 @@ export class BattleScene extends Phaser.Scene {
         playerCard, playerSlot, slotIndex,
         enemyAction, enemyBattleType as any, playerKiCost
       );
-    } else if (priority === 'player_first') {
-      await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, enemyAttackMissed, false, playerKiCost, chainBonus);
-      await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, enemyAttackMissed);
-    } else if (priority === 'enemy_first') {
-      const forceMissPlayer = enemyIsAttack && playerIsDodge && priority === 'enemy_first';
-      await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, false);
-      await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, false, forceMissPlayer, playerKiCost, chainBonus);
     } else {
-      await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, playerDodgeSuccess, playerKiCost, chainBonus);
+      // 플레이어가 막기/회피를 배치했으면 실행 순서와 무관하게 미리 상태 반영
+      // (enemy_first일 때 적 공격 처리 전에 blocking 상태가 false인 버그 방지)
+      if (playerCardValid && playerBattleType === 'defend') {
+        if (playerIsDodge) {
+          this.gameState.player.setDodging(true);
+        } else {
+          this.gameState.player.setBlocking(true);
+        }
+      }
+
+      if (priority === 'player_first') {
+        await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, enemyAttackMissed, false, playerKiCost, chainBonus);
+        await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, enemyAttackMissed);
+      } else if (priority === 'enemy_first') {
+        const forceMissPlayer = enemyIsAttack && playerIsDodge && priority === 'enemy_first';
+        await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, false);
+        await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, false, forceMissPlayer, playerKiCost, chainBonus);
+      } else {
+        await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, playerDodgeSuccess, playerKiCost, chainBonus);
+      }
     }
 
     playerSlot.setHighlight(false);
@@ -1334,7 +1346,7 @@ export class BattleScene extends Phaser.Scene {
       return;
     }
 
-    // 일반 공격 처리
+    // 일반 공격 처리 (ki_gather/defend/regenerate/command는 절대 피해 없음)
     if ((enemyBattleType === 'attack') && !enemyAttackMissed && enemyResult.damage > 0) {
       const playerBlocking = this.gameState.player.isBlocking;
       const playerDodging  = this.gameState.player.isDodging;
