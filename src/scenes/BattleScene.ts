@@ -727,22 +727,9 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private updateChainHints(): void {
+    // 연계 효과 비활성화 (임시) — 힌트 표시 없음
     for (let i = 1; i < SLOT_COUNT; i++) {
-      const prevSlot = this.playerSlots[i - 1];
-      const currSlot = this.playerSlots[i];
-      const prevCard = prevSlot.getCard();
-      const currCard = currSlot.getCard();
-
-      if (!prevCard || !currCard) {
-        currSlot.setChainHint('');
-        continue;
-      }
-
-      const prevTags = prevCard.data.tags ?? [];
-      const currTags = currCard.data.tags ?? [];
-      const bonus = calcChainBonus(prevTags, currTags, currCard.data.effect.type);
-      const hintText = buildChainHintText(bonus);
-      currSlot.setChainHint(hintText);
+      this.playerSlots[i].setChainHint('');
     }
   }
 
@@ -850,19 +837,8 @@ export class BattleScene extends Phaser.Scene {
     }
 
     // 연계 보너스 계산
-    let chainBonus: ChainBonus = { ...NO_CHAIN };
-    if (slotIndex > 0 && playerCard) {
-      const prevCard = this.playerSlots[slotIndex - 1].getCard();
-      if (prevCard) {
-        const prevTags = prevCard.data.tags ?? [];
-        const currTags = playerCard.data.tags ?? [];
-        chainBonus = calcChainBonus(prevTags, currTags, playerCard.data.effect.type);
-        const hintText = buildChainHintText(chainBonus);
-        if (hintText) {
-          this.addBattleLog(`🔗 연계 발동! ${hintText}`);
-        }
-      }
-    }
+    // 연계 효과 비활성화 (임시)
+    const chainBonus: ChainBonus = { ...NO_CHAIN };
 
     const kiShieldBonus = this.kiShieldNextSlotBonus;
     if (kiShieldBonus > 0) {
