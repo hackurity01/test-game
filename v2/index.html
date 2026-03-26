@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>드래곤볼 로그라이트</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- MAP SCREEN -->
+<div id="screen-map" class="screen">
+  <h1 class="map-title">🗼 탑 클라이밍</h1>
+  <div class="map-player-status" id="map-player-status"></div>
+  <div class="floor-list" id="floor-list"></div>
+  <button class="map-enter-btn" id="map-enter-btn">▶ 전투 시작</button>
+</div>
+
+<!-- BATTLE SCREEN -->
+<div id="screen-battle" class="screen">
+  <div class="battle-main">
+    <!-- Enemy section -->
+    <div class="enemy-section">
+      <div class="enemy-header">
+        <span class="enemy-name" id="enemy-name">적</span>
+        <span class="enemy-type-badge" id="enemy-badge">일반</span>
+        <span id="regen-indicator" style="font-size:12px;color:#44ff88;display:none;">재생 1/턴</span>
+        <button class="info-btn" id="enemy-info-btn">ℹ️ 정보</button>
+      </div>
+      <div class="hp-row">
+        <span class="hp-label">HP</span>
+        <div class="hp-bar-wrap"><div class="hp-bar-fill" id="enemy-hp-fill" style="width:100%"></div></div>
+        <span class="hp-text" id="enemy-hp-text">25/25</span>
+      </div>
+      <div class="ki-row">
+        <span class="ki-label">기(氣)</span>
+        <div class="ki-dots" id="enemy-ki-dots"></div>
+        <span class="ki-text" id="enemy-ki-text">0/5</span>
+      </div>
+      <div class="enemy-slots-row" id="enemy-slots-row">
+        <div class="enemy-slot" id="enemy-slot-0"><span class="slot-num">1</span><span>???</span></div>
+        <div class="enemy-slot" id="enemy-slot-1"><span class="slot-num">2</span><span>???</span></div>
+        <div class="enemy-slot" id="enemy-slot-2"><span class="slot-num">3</span><span>???</span></div>
+      </div>
+    </div>
+
+    <!-- Battle message -->
+    <div class="battle-msg-section">
+      <div id="phase-text">배치 단계 - 슬롯에 카드를 배치하세요</div>
+      <div class="passive-panel" id="passive-panel" style="display:none;"></div>
+    </div>
+
+    <!-- Player section -->
+    <div class="player-section">
+      <div class="player-header">
+        <span class="player-name">손오공</span>
+        <span id="mark-display" style="font-size:13px;color:#ffcc44;display:none;"></span>
+      </div>
+      <div class="hp-row">
+        <span class="hp-label">HP</span>
+        <div class="hp-bar-wrap" style="background:#001a00;border-color:#113311;">
+          <div class="hp-bar-fill" id="player-hp-fill" style="background:linear-gradient(90deg,#117711,#44ff44);width:100%"></div>
+        </div>
+        <span class="hp-text" id="player-hp-text" style="color:var(--green)">20/20</span>
+      </div>
+      <div class="ki-row">
+        <span class="ki-label">기(氣)</span>
+        <div class="ki-dots" id="player-ki-dots"></div>
+        <span class="ki-text" id="player-ki-text">0/5</span>
+      </div>
+      <div class="player-slots-row" id="player-slots-row">
+        <div class="player-slot" id="player-slot-0" data-slot="0">
+          <span class="slot-num">1</span>
+          <span class="slot-empty-text">빈 슬롯</span>
+        </div>
+        <div class="player-slot" id="player-slot-1" data-slot="1">
+          <span class="slot-num">2</span>
+          <span class="slot-empty-text">빈 슬롯</span>
+        </div>
+        <div class="player-slot" id="player-slot-2" data-slot="2">
+          <span class="slot-num">3</span>
+          <span class="slot-empty-text">빈 슬롯</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card hand -->
+    <div class="card-section">
+      <div class="card-section-label">
+        🃏 스킬 카드 <span id="deck-info" style="color:#444466;font-size:12px;"></span>
+      </div>
+      <div class="hand-cards" id="hand-cards"></div>
+    </div>
+
+    <!-- Execute button -->
+    <div class="execute-area">
+      <div class="execute-hint" id="execute-hint">카드를 슬롯에 배치한 후 전투를 실행하세요</div>
+      <button id="execute-btn">▶ 전투 실행</button>
+    </div>
+  </div>
+
+  <!-- Battle log panel -->
+  <div class="battle-log-panel" id="battle-log-panel" style="display:none">
+    <div class="log-title">⚔️ 전투 로그 <button id="log-close-btn" onclick="document.getElementById('battle-log-panel').style.display='none'" style="float:right;background:none;border:none;color:#ff6666;cursor:pointer;font-size:16px;line-height:1;">✕</button></div>
+    <div id="battle-log"></div>
+  </div>
+  <button id="log-toggle-btn" onclick="var p=document.getElementById('battle-log-panel');p.style.display=p.style.display==='none'?'flex':'none'" style="position:absolute;bottom:12px;right:12px;background:#111133;border:1px solid #333366;color:#8888cc;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;z-index:10;">📋 로그</button>
+</div>
+
+<!-- REWARD SCREEN -->
+<div id="screen-reward" class="screen">
+  <div class="reward-title">🏆 전투 승리!</div>
+  <div class="reward-subtitle" id="reward-subtitle">카드 1개를 선택해 덱에 추가하세요</div>
+  <div class="reward-cards" id="reward-cards"></div>
+  <button class="reward-skip-btn" id="reward-skip-btn">건너뛰기</button>
+</div>
+
+<!-- RESULT SCREEN -->
+<div id="screen-result" class="screen">
+  <div class="result-title" id="result-title">결과</div>
+  <div class="result-subtitle" id="result-subtitle"></div>
+  <div class="result-stats" id="result-stats"></div>
+  <button class="result-restart-btn" id="result-restart-btn">🔄 새 런 시작</button>
+</div>
+
+  <script src="game.js"></script>
+</body>
+</html>
