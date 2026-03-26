@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>드래곤볼 로그라이트 v3</title>
 <style>
 :root {
@@ -25,7 +25,7 @@
   --rare: #5a1a5a;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;width:100vw;height:100vh;overflow:hidden;user-select:none;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;width:100vw;height:100vh;height:100dvh;overflow:hidden;user-select:none;padding-bottom:env(safe-area-inset-bottom);box-sizing:border-box;}
 .screen{display:none;width:100%;height:100%;}
 .screen.active{display:flex;}
 
@@ -47,7 +47,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .map-enter-btn:hover{background:#1a0a36;color:#fff;box-shadow:0 0 16px #aa44ff55;}
 
 /* ===== BATTLE SCREEN ===== */
-#screen-battle{flex-direction:row;height:100vh;overflow:hidden;}
+#screen-battle{flex-direction:row;height:100vh;height:100dvh;overflow:hidden;}
 .battle-main{flex:1;display:flex;flex-direction:column;min-width:0;padding:0 6px;overflow:hidden;}
 
 /* Enemy section */
@@ -150,7 +150,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .card .card-reactive-badge{position:absolute;bottom:5px;left:5px;font-size:9px;padding:1px 4px;border-radius:5px;background:#150820;color:#9955ff;border:1px solid #551888;}
 
 /* Execute button area */
-.execute-area{display:flex;align-items:center;padding:5px 7px;gap:10px;flex-shrink:0;border-top:1px solid #0e0e22;}
+.execute-area{display:flex;align-items:center;padding:5px 7px;padding-bottom:max(5px, env(safe-area-inset-bottom));gap:10px;flex-shrink:0;border-top:1px solid #0e0e22;}
 #execute-btn{margin-left:auto;padding:9px 22px;font-size:17px;font-weight:bold;background:#060f06;border:2px solid var(--green);color:var(--green);border-radius:8px;cursor:pointer;transition:all 0.15s;min-width:150px;}
 #execute-btn:hover{background:#102010;color:#fff;box-shadow:0 0 14px #33ff7744;}
 #execute-btn:disabled{opacity:0.35;cursor:not-allowed;box-shadow:none;}
