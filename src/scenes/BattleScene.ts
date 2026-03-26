@@ -19,54 +19,54 @@ type BattlePhase =
   | 'executing'   // 실행 단계 (자동 실행)
   | 'result';     // 전투 결과
 
-// 레이아웃 상수 (1600x900 기준)
+// 레이아웃 상수 (1600x900 기준) - 대형 UI 버전
 const LAYOUT = {
-  ENEMY_SECTION_BOTTOM: 240,
+  ENEMY_SECTION_BOTTOM: 220,
   ENEMY_NAME_Y: 20,
   ENEMY_HP_Y: 55,
-  ENEMY_HP_BAR_Y: 80,
-  ENEMY_KI_Y: 100,
-  ENEMY_SKILLS_LABEL_Y: 120,
-  ENEMY_SKILLS_Y: 150,
-  ENEMY_SLOTS_Y: 200,
-  ENEMY_TELEGRAPH_Y: 228,
+  ENEMY_HP_BAR_Y: 82,
+  ENEMY_KI_Y: 120,
+  ENEMY_SKILLS_LABEL_Y: 142,
+  ENEMY_SKILLS_Y: 158,
+  ENEMY_SLOTS_Y: 178,
+  ENEMY_TELEGRAPH_Y: 206,
 
-  BATTLE_SECTION_TOP: 240,
-  BATTLE_SECTION_BOTTOM: 460,
-  PHASE_TEXT_Y: 255,
+  BATTLE_SECTION_TOP: 220,
+  BATTLE_SECTION_BOTTOM: 380,
+  PHASE_TEXT_Y: 238,
 
-  PLAYER_SECTION_TOP: 460,
-  PLAYER_SECTION_BOTTOM: 620,
-  PLAYER_HP_Y: 478,
-  PLAYER_HP_BAR_Y: 505,
-  PLAYER_KI_Y: 530,
-  PLAYER_SLOTS_Y: 560,
+  PLAYER_SECTION_TOP: 380,
+  PLAYER_SECTION_BOTTOM: 665,
+  PLAYER_HP_Y: 395,
+  PLAYER_HP_BAR_Y: 424,
+  PLAYER_KI_Y: 462,
+  PLAYER_SLOTS_Y: 585,
 
-  SKILL_SECTION_TOP: 620,
-  SKILL_SECTION_BOTTOM: 820,
-  SKILL_LABEL_Y: 638,
-  HAND_CARDS_Y: 730,
+  SKILL_SECTION_TOP: 665,
+  SKILL_SECTION_BOTTOM: 858,
+  SKILL_LABEL_Y: 682,
+  HAND_CARDS_Y: 782,
 
-  BOTTOM_Y: 860,
-  LOG_Y: 860,
-  EXECUTE_BTN_Y: 860,
+  BOTTOM_Y: 878,
+  LOG_Y: 878,
+  EXECUTE_BTN_Y: 872,
 
   // Phase 3-4: 패시브 패널 (좌하단)
   PASSIVE_PANEL_X: 20,
-  PASSIVE_PANEL_Y: 840,
+  PASSIVE_PANEL_Y: 893,
 
   // Phase 4-3: 배틀 로그 패널 (우측)
-  BATTLE_LOG_X: 1380,
-  BATTLE_LOG_Y: 270,
-  BATTLE_LOG_WIDTH: 210,
+  BATTLE_LOG_X: 1355,
+  BATTLE_LOG_Y: 238,
+  BATTLE_LOG_WIDTH: 235,
 
   CENTER_X: 800,
   SLOT1_X: 500,
   SLOT2_X: 800,
   SLOT3_X: 1100,
-  KI_GAUGE_X_LEFT: 200,
-  KI_GAUGE_X_RIGHT: 1400,
-  EXECUTE_BTN_X: 1450,
+  KI_GAUGE_X_LEFT: 180,
+  KI_GAUGE_X_RIGHT: 1420,
+  EXECUTE_BTN_X: 1425,
 } as const;
 
 const SLOT_COUNT = 3;
@@ -258,16 +258,16 @@ export class BattleScene extends Phaser.Scene {
     const floorTypeLabel = { normal: '일반', elite: '⚡ 엘리트', boss: '💀 보스' }[floorInfo.enemyType];
 
     this.add.text(20, 8, `${floorInfo.floor}층 · ${floorTypeLabel}`, {
-      fontSize: '13px', color: '#8888cc', fontFamily: 'Arial',
+      fontSize: '16px', color: '#8888cc', fontFamily: 'Arial',
     }).setOrigin(0, 0);
 
     this.enemyNameText = this.add.text(width / 2, LAYOUT.ENEMY_NAME_Y, this.enemy.name, {
-      fontSize: '22px', color: '#ff6666', fontFamily: 'Arial', fontStyle: 'bold',
+      fontSize: '28px', color: '#ff6666', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
 
     // Phase 3-4: ℹ️ 버튼
-    const infoBtn = this.add.text(width / 2 + 120, LAYOUT.ENEMY_NAME_Y + 2, 'ℹ️', {
-      fontSize: '18px', fontFamily: 'Arial',
+    const infoBtn = this.add.text(width / 2 + 150, LAYOUT.ENEMY_NAME_Y + 2, 'ℹ️', {
+      fontSize: '22px', fontFamily: 'Arial',
     }).setOrigin(0, 0).setInteractive({ useHandCursor: true });
 
     infoBtn.on('pointerdown', () => this.toggleEnemyInfoPopup());
@@ -275,11 +275,11 @@ export class BattleScene extends Phaser.Scene {
     infoBtn.on('pointerout', () => infoBtn.setStyle({ color: '#ffffff' }));
 
     this.enemyHpText = this.add.text(width / 2, LAYOUT.ENEMY_HP_Y, '', {
-      fontSize: '13px', color: '#ff8888', fontFamily: 'Arial',
+      fontSize: '16px', color: '#ff8888', fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
 
-    this.add.rectangle(width / 2, LAYOUT.ENEMY_HP_BAR_Y, 300, 10, 0x330000).setStrokeStyle(1, 0x551111);
-    this.enemyHpBar = this.add.rectangle(width / 2, LAYOUT.ENEMY_HP_BAR_Y, 300, 10, 0xdd2222);
+    this.add.rectangle(width / 2, LAYOUT.ENEMY_HP_BAR_Y, 360, 20, 0x330000).setStrokeStyle(1, 0x551111);
+    this.enemyHpBar = this.add.rectangle(width / 2, LAYOUT.ENEMY_HP_BAR_Y, 360, 20, 0xdd2222);
 
     this.enemyKiGauge = new KiGauge({
       scene: this,
@@ -288,15 +288,16 @@ export class BattleScene extends Phaser.Scene {
       maxKi: this.enemy.maxKi,
       label: '적 기',
       color: 0xff4444,
-      width: 140,
+      width: 200,
+      height: 28,
     });
 
     this.add.text(20, LAYOUT.ENEMY_SKILLS_LABEL_Y, '사용 가능 기술:', {
-      fontSize: '11px', color: '#888888', fontFamily: 'Arial',
+      fontSize: '14px', color: '#888888', fontFamily: 'Arial',
     }).setOrigin(0, 0);
 
     const availableSkills = this.enemy.availableSkills;
-    let skillX = 130;
+    let skillX = 160;
     availableSkills.forEach(skill => {
       const isPierce = skill.type === 'attack_pierce';
       const isAttack = skill.type === 'attack_s' || skill.type === 'attack_l' || skill.type === 'special' || isPierce;
@@ -305,32 +306,32 @@ export class BattleScene extends Phaser.Scene {
       const tagBorderColor = isAttack ? 0xaa3333 : (skill.type === 'ki_gather' ? 0x3355aa : (isCommand ? 0xaa6600 : 0x33aa33));
       const textColor = isAttack ? '#ff8888' : (skill.type === 'ki_gather' ? '#88aaff' : (isCommand ? '#ffaa44' : '#88ff88'));
 
-      const tagWidth = skill.name.length * 9 + 16;
-      this.add.rectangle(skillX + tagWidth / 2, LAYOUT.ENEMY_SKILLS_LABEL_Y + 6, tagWidth, 22, tagColor)
+      const tagWidth = skill.name.length * 11 + 18;
+      this.add.rectangle(skillX + tagWidth / 2, LAYOUT.ENEMY_SKILLS_LABEL_Y + 9, tagWidth, 28, tagColor)
         .setStrokeStyle(1, tagBorderColor);
-      this.add.text(skillX + tagWidth / 2, LAYOUT.ENEMY_SKILLS_LABEL_Y + 6, skill.name, {
-        fontSize: '11px', color: textColor, fontFamily: 'Arial',
+      this.add.text(skillX + tagWidth / 2, LAYOUT.ENEMY_SKILLS_LABEL_Y + 9, skill.name, {
+        fontSize: '14px', color: textColor, fontFamily: 'Arial',
       }).setOrigin(0.5, 0.5);
-      skillX += tagWidth + 6;
+      skillX += tagWidth + 8;
     });
 
     const slotLabels = ['슬롯 1', '슬롯 2', '슬롯 3'];
     for (let i = 0; i < SLOT_COUNT; i++) {
       const container = this.add.container(SLOT_X_POSITIONS[i], LAYOUT.ENEMY_SLOTS_Y);
 
-      const bg = this.add.rectangle(0, 0, 140, 38, 0x220033).setStrokeStyle(1, 0x553366);
-      const label = this.add.text(-55, -16, slotLabels[i], {
-        fontSize: '10px', color: '#886699', fontFamily: 'Arial',
+      const bg = this.add.rectangle(0, 0, 160, 46, 0x220033).setStrokeStyle(1, 0x553366);
+      const label = this.add.text(-62, -18, slotLabels[i], {
+        fontSize: '13px', color: '#886699', fontFamily: 'Arial',
       }).setOrigin(0, 0);
-      const actionText = this.add.text(0, 4, '???', {
-        fontSize: '13px', color: '#cc88ff', fontFamily: 'Arial', fontStyle: 'bold',
+      const actionText = this.add.text(0, 5, '???', {
+        fontSize: '17px', color: '#cc88ff', fontFamily: 'Arial', fontStyle: 'bold',
       }).setOrigin(0.5, 0.5);
 
       container.add([bg, label, actionText]);
       this.enemySlotContainers.push(container);
 
       const telegraph = this.add.text(SLOT_X_POSITIONS[i], LAYOUT.ENEMY_TELEGRAPH_Y, '', {
-        fontSize: '10px',
+        fontSize: '13px',
         color: '#ffff00',
         fontFamily: 'Arial',
         fontStyle: 'italic',
@@ -346,21 +347,21 @@ export class BattleScene extends Phaser.Scene {
     const midY = (LAYOUT.BATTLE_SECTION_TOP + LAYOUT.BATTLE_SECTION_BOTTOM) / 2;
 
     this.phaseText = this.add.text(width / 2, LAYOUT.PHASE_TEXT_Y, '카드를 슬롯에 배치하세요', {
-      fontSize: '14px', color: '#888888', fontFamily: 'Arial',
+      fontSize: '18px', color: '#888888', fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
 
-    this.add.text(width / 2, midY - 50, '👾', {
-      fontSize: '48px', fontFamily: 'Arial',
+    this.add.text(width / 2, midY - 30, '👾', {
+      fontSize: '64px', fontFamily: 'Arial',
     }).setOrigin(0.5, 0.5);
   }
 
   private createPlayerArea(width: number): void {
     this.playerHpText = this.add.text(width / 2, LAYOUT.PLAYER_HP_Y, '', {
-      fontSize: '13px', color: '#88ff88', fontFamily: 'Arial',
+      fontSize: '16px', color: '#88ff88', fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
 
-    this.add.rectangle(width / 2, LAYOUT.PLAYER_HP_BAR_Y, 300, 10, 0x003300).setStrokeStyle(1, 0x115511);
-    this.playerHpBar = this.add.rectangle(width / 2, LAYOUT.PLAYER_HP_BAR_Y, 300, 10, 0x22dd22);
+    this.add.rectangle(width / 2, LAYOUT.PLAYER_HP_BAR_Y, 360, 20, 0x003300).setStrokeStyle(1, 0x115511);
+    this.playerHpBar = this.add.rectangle(width / 2, LAYOUT.PLAYER_HP_BAR_Y, 360, 20, 0x22dd22);
 
     this.playerKiGauge = new KiGauge({
       scene: this,
@@ -369,7 +370,8 @@ export class BattleScene extends Phaser.Scene {
       maxKi: this.gameState.player.maxKi,
       label: '기',
       color: 0x4488ff,
-      width: 140,
+      width: 200,
+      height: 28,
     });
 
     const slotLabels = ['슬롯 1', '슬롯 2', '슬롯 3'];
@@ -390,24 +392,24 @@ export class BattleScene extends Phaser.Scene {
 
   private createSkillArea(width: number, _height: number): void {
     this.add.text(width / 2, LAYOUT.SKILL_LABEL_Y, '스킬 선택 (클릭하여 슬롯에 배치)', {
-      fontSize: '12px', color: '#666688', fontFamily: 'Arial',
+      fontSize: '15px', color: '#666688', fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
   }
 
   private createBottomArea(width: number, height: number): void {
     // 하단 로그 텍스트 제거됨 (우측 BattleLogUI로 통합)
     this.logText = this.add.text(width / 2, LAYOUT.LOG_Y, '', {
-      fontSize: '11px', color: '#888888', fontFamily: 'Arial',
+      fontSize: '14px', color: '#888888', fontFamily: 'Arial',
       align: 'center',
       wordWrap: { width: 900 },
     }).setOrigin(0.5, 0.5).setVisible(false);
 
-    this.executeBtnBg = this.add.rectangle(LAYOUT.EXECUTE_BTN_X, LAYOUT.EXECUTE_BTN_Y, 160, 36, 0x224422)
+    this.executeBtnBg = this.add.rectangle(LAYOUT.EXECUTE_BTN_X, LAYOUT.EXECUTE_BTN_Y, 200, 50, 0x224422)
       .setStrokeStyle(2, 0x44cc44)
       .setInteractive({ useHandCursor: true });
 
     this.executeBtn = this.add.text(LAYOUT.EXECUTE_BTN_X, LAYOUT.EXECUTE_BTN_Y, '▶ 전투 실행', {
-      fontSize: '15px', color: '#44ff44', fontFamily: 'Arial', fontStyle: 'bold',
+      fontSize: '20px', color: '#44ff44', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0.5);
 
     this.executeBtnBg.on('pointerover', () => this.executeBtnBg.setFillStyle(0x336633));
@@ -415,7 +417,7 @@ export class BattleScene extends Phaser.Scene {
     this.executeBtnBg.on('pointerdown', () => this.onExecuteClicked());
 
     this.add.text(20, height - 12, '손오공', {
-      fontSize: '12px', color: '#666644', fontFamily: 'Arial',
+      fontSize: '15px', color: '#666644', fontFamily: 'Arial',
     }).setOrigin(0, 1);
   }
 
@@ -433,7 +435,7 @@ export class BattleScene extends Phaser.Scene {
       LAYOUT.ENEMY_HP_Y + 20,
       '재생 1/턴',
       {
-        fontSize: '11px',
+        fontSize: '14px',
         color: '#44ff88',
         fontFamily: 'Arial',
         fontStyle: 'italic',
@@ -469,14 +471,14 @@ export class BattleScene extends Phaser.Scene {
     }
 
     // 배경
-    const panelWidth = Math.min(400, passiveCards.length * 120 + 20);
-    const bg = this.add.rectangle(panelWidth / 2, -10, panelWidth, 24, 0x111133, 0.7)
+    const panelWidth = Math.min(500, passiveCards.length * 140 + 20);
+    const bg = this.add.rectangle(panelWidth / 2, -12, panelWidth, 30, 0x111133, 0.7)
       .setStrokeStyle(1, 0x333366);
     this.passivePanelContainer.add(bg);
 
     // 라벨
-    const label = this.add.text(6, -18, '패시브:', {
-      fontSize: '10px', color: '#6666aa', fontFamily: 'Arial',
+    const label = this.add.text(6, -20, '패시브:', {
+      fontSize: '13px', color: '#6666aa', fontFamily: 'Arial',
     }).setOrigin(0, 0.5);
     this.passivePanelContainer.add(label);
 
@@ -490,8 +492,8 @@ export class BattleScene extends Phaser.Scene {
     let xOffset = 55;
     passiveCards.forEach((card) => {
       const iconText = passiveIconMap[card.data.id] ?? `✨ ${card.data.name}`;
-      const txt = this.add.text(xOffset, -18, iconText, {
-        fontSize: '11px',
+      const txt = this.add.text(xOffset, -20, iconText, {
+        fontSize: '14px',
         color: '#aaaaff',
         fontFamily: 'Arial',
         fontStyle: 'bold',
@@ -503,8 +505,8 @@ export class BattleScene extends Phaser.Scene {
 
       // 구분자 (마지막 항목 제외)
       if (xOffset < panelWidth) {
-        const sep = this.add.text(xOffset - 6, -18, '|', {
-          fontSize: '11px', color: '#444466', fontFamily: 'Arial',
+        const sep = this.add.text(xOffset - 6, -20, '|', {
+          fontSize: '14px', color: '#444466', fontFamily: 'Arial',
         }).setOrigin(0.5, 0.5);
         this.passivePanelContainer.add(sep);
       }
@@ -578,7 +580,7 @@ export class BattleScene extends Phaser.Scene {
     const bg = this.add.rectangle(popupW / 2, popupH / 2, popupW, popupH, 0x111122, 0.95)
       .setStrokeStyle(2, 0x6644aa);
     const txt = this.add.text(10, 10, popupText, {
-      fontSize: '11px',
+      fontSize: '13px',
       color: '#ccccff',
       fontFamily: 'Arial',
       wordWrap: { width: popupW - 20 },
@@ -586,7 +588,7 @@ export class BattleScene extends Phaser.Scene {
 
     // 닫기 버튼
     const closeBtn = this.add.text(popupW - 8, 4, '✕', {
-      fontSize: '14px', color: '#ff6666', fontFamily: 'Arial',
+      fontSize: '16px', color: '#ff6666', fontFamily: 'Arial',
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     closeBtn.on('pointerdown', () => this.closeEnemyInfoPopup());
 
@@ -638,7 +640,7 @@ export class BattleScene extends Phaser.Scene {
     });
 
     const { width } = this.scale;
-    const cardSpacing = 110;
+    const cardSpacing = 155;
     const totalWidth = Math.max(0, (availableCards.length - 1) * cardSpacing);
     const startX = width / 2 - totalWidth / 2;
 
@@ -778,21 +780,40 @@ export class BattleScene extends Phaser.Scene {
     this.revealEnemySlot(2, this.enemy.intent.action3);
     await this.wait(600);
 
-    // 슬롯 1 → 2 → 3 순서로 실행
-    this.setSlotEmphasis(0);
-    await this.executeSlotPhase(0);
-
-    if (!this.enemy.isDead() && !this.gameState.player.isDead()) {
-      this.setSlotEmphasis(1);
-      await this.executeSlotPhase(1);
+    // Build player queue from non-empty slots
+    type PlayerQueueItem = { card: CardInstance; slot: SlotUI };
+    const playerQueue: PlayerQueueItem[] = [];
+    for (let i = 0; i < maxSlots; i++) {
+      const slot = this.playerSlots[i];
+      const card = slot.getCard();
+      if (card) playerQueue.push({ card, slot });
     }
 
-    if (!this.enemy.isDead() && !this.gameState.player.isDead()) {
-      this.setSlotEmphasis(2);
-      await this.executeSlotPhase(2);
+    // Build enemy queue
+    type EnemyQueueItem = { action: EnemyAction; slotIdx: number };
+    const enemyQueue: EnemyQueueItem[] = [
+      { action: this.enemy.intent.action1, slotIdx: 0 },
+      { action: this.enemy.intent.action2, slotIdx: 1 },
+      { action: this.enemy.intent.action3, slotIdx: 2 },
+    ];
+
+    let roundIndex = 0;
+    while (playerQueue.length > 0 || enemyQueue.length > 0) {
+      const playerItem = playerQueue.length > 0 ? playerQueue.shift()! : null;
+      const enemyItem = enemyQueue.length > 0 ? enemyQueue.shift()! : null;
+
+      await this.executeRound(
+        playerItem?.card ?? null,
+        playerItem?.slot ?? null,
+        enemyItem?.action ?? null,
+        enemyItem?.slotIdx ?? Math.min(roundIndex, SLOT_COUNT - 1),
+        roundIndex
+      );
+
+      roundIndex++;
+      if (this.enemy.isDead() || this.gameState.player.isDead()) break;
     }
 
-    this.clearSlotEmphasis();
     this.playerSlots.forEach(s => s.removeCard());
     this.enemy.generateIntent();
     this.hideAllEnemySlots();
@@ -801,39 +822,125 @@ export class BattleScene extends Phaser.Scene {
     this.checkBattleResult();
   }
 
-  private setSlotEmphasis(activeSlot: number): void {
-    for (let i = 0; i < SLOT_COUNT; i++) {
-      const alpha = i === activeSlot ? 1 : 0.3;
-      this.enemySlotContainers[i].setAlpha(alpha);
-      this.playerSlots[i].getContainer().setAlpha(alpha);
-    }
+  private setRoundProgress(roundIndex: number): void {
+    this.phaseText.setText(`라운드 ${roundIndex + 1} 진행 중...`);
   }
 
-  private clearSlotEmphasis(): void {
-    for (let i = 0; i < SLOT_COUNT; i++) {
-      this.enemySlotContainers[i].setAlpha(1);
-      this.playerSlots[i].getContainer().setAlpha(1);
+  // =================== 라운드 실행 ===================
+
+  private async executeRound(
+    playerCard: CardInstance | null,
+    playerSlot: SlotUI | null,
+    enemyAction: EnemyAction | null,
+    enemySlotIdx: number,
+    roundIndex: number
+  ): Promise<void> {
+    if (!enemyAction) {
+      this.addBattleLog(`── 라운드 ${roundIndex + 1} (단독 발동) ──`);
+    } else if (!playerCard) {
+      this.addBattleLog(`── 라운드 ${roundIndex + 1} (무방비 피격!) ──`);
+    } else {
+      this.addBattleLog(`── 라운드 ${roundIndex + 1} 대결 ──`);
     }
-  }
 
-  // =================== 슬롯 실행 ===================
+    this.setRoundProgress(roundIndex);
+    playerSlot?.setHighlight(true);
 
-  private async executeSlotPhase(slotIndex: number): Promise<void> {
-    const playerSlot = this.playerSlots[slotIndex];
-    const playerCard = playerSlot.getCard();
-    const intentActions = [this.enemy.intent.action1, this.enemy.intent.action2, this.enemy.intent.action3];
-    const enemyAction = intentActions[slotIndex];
-
-    this.addBattleLog(`── 슬롯 ${slotIndex + 1} 대결 ──`);
-    playerSlot.setHighlight(true);
-
-    // 슬롯 시작 시 막기/회피 상태 초기화
+    // 라운드 시작 시 막기/회피 상태 초기화
     this.gameState.player.setBlocking(false);
     this.gameState.player.setDodging(false);
 
     // Phase 3-2: regenerate 슬롯 취약 표시
-    if (enemyAction.type === 'regenerate') {
-      this.showVulnerableText(slotIndex);
+    if (enemyAction && enemyAction.type === 'regenerate') {
+      this.showVulnerableText(enemySlotIdx);
+    }
+
+    // 클래시 애니메이션
+    await this.showCardClashAnimation(
+      playerCard?.data.name ?? null,
+      enemyAction?.name ?? null
+    );
+
+    // null enemyAction: 플레이어 단독 발동
+    if (!enemyAction) {
+      if (playerCard && playerSlot) {
+        const playerKiCostFinal = Math.max(playerCard.data.kiCost > 0 ? 1 : 0, playerCard.data.kiCost - this.kiShieldNextSlotBonus);
+        this.kiShieldNextSlotBonus = 0;
+
+        if (playerCard.usesLeft !== null && playerCard.usesLeft <= 0) {
+          this.addBattleLog(`❌ [${playerCard.data.name}]: 사용 횟수 소진 → 무효`);
+          await playerSlot.flashInsufficientKi();
+        } else if (!this.gameState.player.hasEnoughKi(playerKiCostFinal)) {
+          this.addBattleLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효`);
+          await playerSlot.flashInsufficientKi();
+        } else {
+          const effectType = playerCard.data.effect.type;
+          if (effectType === 'block' || effectType === 'dodge') {
+            this.addBattleLog(`⚪ [${playerCard.data.name}]: 상대 없음 → 효과 없음`);
+            this.gameState.player.spendKi(playerKiCostFinal);
+            if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+            this.updateKiGauges();
+            await playerSlot.flashExecuted();
+          } else if (effectType === 'damage') {
+            this.gameState.player.spendKi(playerKiCostFinal);
+            if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+            this.updateKiGauges();
+            await this.applyAttackEffect(playerCard, playerSlot, { ...NO_CHAIN });
+          } else if (effectType === 'ki_gain') {
+            this.gameState.player.spendKi(playerKiCostFinal);
+            if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+            this.updateKiGauges();
+            const isAtMax = this.gameState.player.ki >= this.gameState.player.maxKi;
+            if (isAtMax) {
+              this.addBattleLog('🔋 기 과부하! 기모으기 실패');
+              this.showSlotNotification(Math.min(roundIndex, SLOT_COUNT - 1), '기 과부하!', '#ff8800');
+            } else {
+              const gained = this.gameState.player.gainKi(playerCard.data.effect.value);
+              this.addBattleLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
+              const results = this.skillSystem.trigger({
+                type: 'ki_gather_success',
+                context: { player: this.gameState.player, enemy: this.enemy, slotIndex: roundIndex },
+              });
+              for (const r of results) {
+                if (r.message) this.addBattleLog(r.message);
+                if (r.extraKi) this.gameState.player.gainKi(r.extraKi);
+              }
+              this.updateKiGauges();
+            }
+            await playerSlot.flashExecuted();
+          } else if (effectType === 'steal_ki') {
+            this.gameState.player.spendKi(playerKiCostFinal);
+            if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+            this.updateKiGauges();
+            const stolen = this.enemy.stealKi(playerCard.data.effect.value);
+            if (stolen > 0) {
+              this.gameState.player.gainKi(stolen);
+              this.addBattleLog(`💰 [${playerCard.data.name}]: 적에게서 기 ${stolen} 강탈!`);
+              this.updateKiGauges();
+            } else {
+              this.addBattleLog(`💰 [${playerCard.data.name}]: 강탈했지만 적의 기가 없었다.`);
+            }
+            await playerSlot.flashExecuted();
+          } else if (effectType === 'mark') {
+            this.gameState.player.spendKi(playerKiCostFinal);
+            if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+            this.updateKiGauges();
+            const markVal = playerCard.data.effect.value;
+            this.enemy.addMark(markVal);
+            this.addBattleLog(`🎯 [${playerCard.data.name}]: 적에게 표식 +${markVal}`);
+            await playerSlot.flashExecuted();
+          } else {
+            this.gameState.player.spendKi(playerKiCostFinal);
+            if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+            this.updateKiGauges();
+            await playerSlot.flashExecuted();
+          }
+        }
+      }
+      playerSlot?.setHighlight(false);
+      this.updateAllUI();
+      await this.wait(300);
+      return;
     }
 
     // 연계 보너스 계산
@@ -862,10 +969,10 @@ export class BattleScene extends Phaser.Scene {
     if (playerCard) {
       if (playerCard.usesLeft !== null && playerCard.usesLeft <= 0) {
         this.addBattleLog(`❌ [${playerCard.data.name}]: 사용 횟수 소진 → 무효`);
-        await playerSlot.flashInsufficientKi();
+        await playerSlot?.flashInsufficientKi();
       } else if (!this.gameState.player.hasEnoughKi(playerKiCost)) {
         this.addBattleLog(`❌ [${playerCard.data.name}]: 기 부족 → 무효 (필요: ${playerKiCost})`);
-        await playerSlot.flashInsufficientKi();
+        await playerSlot?.flashInsufficientKi();
       } else {
         playerCardValid = true;
         const effectType = playerCard.data.effect.type;
@@ -903,9 +1010,9 @@ export class BattleScene extends Phaser.Scene {
 
     const enemyAttackMissed = playerDodgeSuccess;
 
-    if (playerCardValid && playerBattleType === 'reactive' && playerCard) {
+    if (playerCardValid && playerBattleType === 'reactive' && playerCard && playerSlot) {
       await this.executeReactiveSkill(
-        playerCard, playerSlot, slotIndex,
+        playerCard, playerSlot, enemySlotIdx,
         enemyAction, enemyBattleType as any, playerKiCost
       );
     } else {
@@ -920,20 +1027,121 @@ export class BattleScene extends Phaser.Scene {
       }
 
       if (priority === 'player_first') {
-        await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, enemyAttackMissed, false, playerKiCost, chainBonus);
-        await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, enemyAttackMissed);
+        await this.executePlayerAction(playerCard, playerCardValid, playerBattleType, playerSlot!, roundIndex, enemyAction, enemyBattleType as any, enemyAttackMissed, false, playerKiCost, chainBonus);
+        await this.executeEnemyAction(enemyAction, enemyBattleType as any, enemySlotIdx, playerBattleType, playerCardValid, false, enemyAttackMissed);
       } else if (priority === 'enemy_first') {
         const forceMissPlayer = enemyIsAttack && playerIsDodge && priority === 'enemy_first';
-        await this.executeEnemyAction(enemyAction, enemyBattleType as any, slotIndex, playerBattleType, playerCardValid, false, false);
-        await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, false, forceMissPlayer, playerKiCost, chainBonus);
+        await this.executeEnemyAction(enemyAction, enemyBattleType as any, enemySlotIdx, playerBattleType, playerCardValid, false, false);
+        await this.executePlayerAction(playerCard, playerCardValid && !forceMissPlayer, playerBattleType, playerSlot!, roundIndex, enemyAction, enemyBattleType as any, false, forceMissPlayer, playerKiCost, chainBonus);
       } else {
-        await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot, slotIndex, enemyAction, enemyBattleType as any, playerDodgeSuccess, playerKiCost, chainBonus);
+        await this.executeSimultaneous(playerCard, playerCardValid, playerBattleType, playerSlot!, roundIndex, enemySlotIdx, enemyAction, enemyBattleType as any, playerDodgeSuccess, playerKiCost, chainBonus);
       }
     }
 
-    playerSlot.setHighlight(false);
+    playerSlot?.setHighlight(false);
     this.updateAllUI();
     await this.wait(300);
+  }
+
+  /**
+   * 카드 클래시 애니메이션
+   */
+  private async showCardClashAnimation(playerCardName: string | null, enemyCardName: string | null): Promise<void> {
+    const { width } = this.scale;
+    const centerX = width / 2;
+    const centerY = (LAYOUT.BATTLE_SECTION_TOP + LAYOUT.BATTLE_SECTION_BOTTOM) / 2 - 10;
+
+    const playerText = playerCardName ? this.add.text(-100, centerY, playerCardName, {
+      fontSize: '22px',
+      color: '#88ff88',
+      fontFamily: 'Arial',
+      fontStyle: 'bold',
+      stroke: '#003300',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 0.5).setDepth(50) : null;
+
+    const enemyText = enemyCardName ? this.add.text(width + 100, centerY, enemyCardName, {
+      fontSize: '22px',
+      color: '#ff8888',
+      fontFamily: 'Arial',
+      fontStyle: 'bold',
+      stroke: '#330000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 0.5).setDepth(50) : null;
+
+    // Fly to center
+    await new Promise<void>((resolve) => {
+      let completed = 0;
+      const total = (playerText ? 1 : 0) + (enemyText ? 1 : 0);
+      if (total === 0) { resolve(); return; }
+      const done = () => { completed++; if (completed >= total) resolve(); };
+
+      if (playerText) {
+        this.tweens.add({
+          targets: playerText,
+          x: centerX - 80,
+          duration: 300,
+          ease: 'Power2',
+          onComplete: done,
+        });
+      }
+      if (enemyText) {
+        this.tweens.add({
+          targets: enemyText,
+          x: centerX + 80,
+          duration: 300,
+          ease: 'Power2',
+          onComplete: done,
+        });
+      }
+    });
+
+    // Brief pause at center
+    await this.wait(150);
+
+    // Shake effect (both texts shake briefly)
+    if (playerText || enemyText) {
+      const targets = [playerText, enemyText].filter(t => t !== null);
+      await new Promise<void>((resolve) => {
+        this.tweens.add({
+          targets,
+          x: { value: `+=8`, ease: 'Sine.easeInOut' },
+          duration: 60,
+          yoyo: true,
+          repeat: 2,
+          onComplete: () => resolve(),
+        });
+      });
+    }
+
+    // Fly apart and fade out
+    await new Promise<void>((resolve) => {
+      let completed = 0;
+      const total = (playerText ? 1 : 0) + (enemyText ? 1 : 0);
+      if (total === 0) { resolve(); return; }
+      const done = () => { completed++; if (completed >= total) resolve(); };
+
+      if (playerText) {
+        this.tweens.add({
+          targets: playerText,
+          x: -100,
+          alpha: 0,
+          duration: 250,
+          ease: 'Power2',
+          onComplete: () => { playerText.destroy(); done(); },
+        });
+      }
+      if (enemyText) {
+        this.tweens.add({
+          targets: enemyText,
+          x: width + 100,
+          alpha: 0,
+          duration: 250,
+          ease: 'Power2',
+          onComplete: () => { enemyText.destroy(); done(); },
+        });
+      }
+    });
   }
 
   /**
@@ -1097,7 +1305,7 @@ export class BattleScene extends Phaser.Scene {
         const isAtMax = this.gameState.player.ki >= this.gameState.player.maxKi;
         if (isAtMax) {
           this.addBattleLog('🔋 기 과부하! 기모으기 실패');
-          this.showSlotNotification(slotIndex, '기 과부하!', '#ff8800');
+          this.showSlotNotification(Math.min(slotIndex, SLOT_COUNT - 1), '기 과부하!', '#ff8800');
           await playerSlot.flashExecuted();
           // 오버차지 시 Ki게이지 업데이트 (주황색 표시)
           this.updateKiGauges();
@@ -1154,7 +1362,7 @@ export class BattleScene extends Phaser.Scene {
             this.enemy.addKi(1);
             this.addBattleLog('🌀 [무한의 망토] 발동! 적 기+1');
             this.updateKiGauges();
-            this.flashEnemySlotBg(slotIndex, 0x8800ff);
+            this.flashEnemySlotBg(Math.min(slotIndex, SLOT_COUNT - 1), 0x8800ff);
           }
         }
         await playerSlot.flashExecuted();
@@ -1238,7 +1446,7 @@ export class BattleScene extends Phaser.Scene {
         if (enemyAttacking) {
           this.addBattleLog(`❌ [${playerCard.data.name}]: 공격받아 눈치보기 실패!`);
         } else {
-          const nextIdx = slotIndex + 1;
+          const nextIdx = Math.min(slotIndex + 1, SLOT_COUNT - 1);
           if (nextIdx < SLOT_COUNT) {
             const nextActions = [this.enemy.intent.action1, this.enemy.intent.action2, this.enemy.intent.action3];
             this.revealEnemySlot(nextIdx, nextActions[nextIdx]);
@@ -1292,7 +1500,7 @@ export class BattleScene extends Phaser.Scene {
 
     if (enemyResult.skipped) {
       this.addBattleLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`);
-      this.flashEnemySlotBg(slotIndex, 0x880000);
+      this.flashEnemySlotBg(Math.min(slotIndex, SLOT_COUNT - 1), 0x880000);
       return;
     }
 
@@ -1373,6 +1581,7 @@ export class BattleScene extends Phaser.Scene {
     playerBattleType: string,
     playerSlot: SlotUI,
     slotIndex: number,
+    enemySlotIdx: number,
     enemyAction: EnemyAction,
     enemyBattleType: 'ki_gather' | 'attack' | 'defend' | 'regenerate' | 'command',
     playerDodgeSuccess: boolean,
@@ -1437,7 +1646,7 @@ export class BattleScene extends Phaser.Scene {
     );
 
     await this.executeEnemyAction(
-      enemyAction, enemyBattleType, slotIndex,
+      enemyAction, enemyBattleType, enemySlotIdx,
       playerBattleType, playerCardValid, false,
       playerDodgeSuccess
     );
