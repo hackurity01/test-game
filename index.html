@@ -1348,12 +1348,17 @@ class BattleGame {
 
     const dodgeSucceeds=isPlayerDodge&&isEnemyAttack&&(priority==='player_first'||priority==='simultaneous');
 
-    const dodgeFail=isPlayerDodge&&isEnemyAttack&&priority==='enemy_first';
-    // 모든 경우 플레이어/적 애니메이션 동시 실행
-    await Promise.all([
-      this._doPlayerAction(playerCard, playerValid&&!dodgeFail, playerEffType, slotIdx, enemyAction, playerKiCost),
-      this._doEnemyAction(enemyAction, slotIdx, playerEffType, playerValid, false)
-    ]);
+    const dodgeFail=isPlayerDodge&&isEnemyAttack&&priority==="enemy_first";
+    if(priority==="simultaneous"||(!playerCard&&!playerValid)) {
+      // 동시: _doSimultaneous 사용 (충돌 애니메이션 포함)
+      await this._doSimultaneous(playerCard, playerValid, playerEffType, slotIdx, enemyAction, playerKiCost, dodgeSucceeds);
+    } else {
+      // 선후 관계가 있어도 애니메이션은 동시 실행
+      await Promise.all([
+        this._doPlayerAction(playerCard, playerValid&&!dodgeFail, playerEffType, slotIdx, enemyAction, playerKiCost),
+        this._doEnemyAction(enemyAction, slotIdx, playerEffType, playerValid, false)
+      ]);
+    }
   }
 
   async _executeReactive(card, slotIdx, enemyAction, actualKiCost) {
