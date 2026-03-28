@@ -1462,7 +1462,8 @@ class BattleGame {
       case 'block': {
         gs.player.isBlocking=true;
         this.addLog(`🛡 [${card.data.name}]: 막기 준비!`,'player');
-        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'); // 동시 실행 (await 제거)
+        // 0.5초 후 slideBack (투사체가 날아오는 타이밍에 맞춰 물러남)
+        setTimeout(()=>this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'), 500);
         if(this.enemy.type==='boss'&&this.enemy.passives.includes('infinite_cloak')) {
           this.enemy.addKi(1);
           this.addLog('🌀 [무한의 망토] 발동! 적 기+1','passive');
@@ -1478,7 +1479,7 @@ class BattleGame {
         gs.player.isDodging=true;
         if(isEnemyAttack) this.addLog(`💨 [${card.data.name}]: 선공 순간이동 → 적 공격 회피!`,'player');
         else this.addLog(`💨 [${card.data.name}]: 회피 준비!`,'player');
-        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'); // 동시 실행
+        setTimeout(()=>this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'), 500);
         break;
       }
       case 'damage': {
@@ -1549,6 +1550,7 @@ class BattleGame {
     const eSlotEl=document.getElementById(`enemy-slot-${slotIdx}`);
     if(enemyIsDefend) {
       await this._shootProjectile(pSlotEl, eSlotEl, '#ffff44', '⚡', 'block');
+      SFX.blockSuccess(); // 🔊 적이 막기로 상쇄
       this.addLog(`🛡 적이 막기로 [${card.data.name}]을 막았다!`,'enemy');
     } else {
       await this._shootProjectile(pSlotEl, eSlotEl, '#ffff44', '⚡', 'hit');
