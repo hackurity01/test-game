@@ -11,6 +11,7 @@ import { CardUI } from '../ui/CardUI';
 import { SlotUI } from '../ui/SlotUI';
 import { KiGauge } from '../ui/KiGauge';
 import { BattleLogUI } from '../ui/BattleLogUI';
+import { SoundManager } from '../game/SoundManager';
 
 /** 전투 단계 */
 type BattlePhase =
@@ -156,8 +157,14 @@ export class BattleScene extends Phaser.Scene {
   private selectedCard: CardInstance | null = null;
   private battleLog: string[] = [];
 
-  /** sense 스킬 효과 상태 */
+  /** sense 스킬 활성 여부 (player.cardLimit < SLOT_COUNT 와 함께 관리) */
   private senseActive: boolean = false;
+
+  /** delete_last_card 처리용: onExecuteClicked 큐 참조 */
+  private currentRemainingEnemyQueueRef: Array<{ action: import('../game/Enemy').EnemyAction; slotIdx: number }> | null = null;
+
+  /** 현재 라운드가 무방비 피격인지 여부 */
+  private isUndefendedRound: boolean = false;
 
   /** ki_shield 연속 효과 상태 */
   private kiShieldNextSlotBonus: number = 0;
@@ -177,6 +184,9 @@ export class BattleScene extends Phaser.Scene {
   private enemyInfoPopup: Phaser.GameObjects.Container | null = null;
   /** 팝업 열림 여부 */
   private enemyInfoOpen: boolean = false;
+
+  // ── 사운드 ──
+  private sfx: SoundManager = new SoundManager();
 
   constructor() {
     super({ key: 'BattleScene' });
@@ -797,6 +807,9 @@ export class BattleScene extends Phaser.Scene {
       { action: this.enemy.intent.action3, slotIdx: 2 },
     ];
 
+    // delete_last_card 효과에서 접근할 수 있도록 큐 참조 저장
+    this.currentRemainingEnemyQueueRef = enemyQueue;
+
     let roundIndex = 0;
     while (playerQueue.length > 0 || enemyQueue.length > 0) {
       const playerItem = playerQueue.length > 0 ? playerQueue.shift()! : null;
@@ -813,6 +826,8 @@ export class BattleScene extends Phaser.Scene {
       roundIndex++;
       if (this.enemy.isDead() || this.gameState.player.isDead()) break;
     }
+
+    this.currentRemainingEnemyQueueRef = null;
 
     this.playerSlots.forEach(s => s.removeCard());
     this.enemy.generateIntent();
@@ -897,6 +912,7 @@ export class BattleScene extends Phaser.Scene {
             } else {
               const gained = this.gameState.player.gainKi(playerCard.data.effect.value);
               this.addBattleLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
+              this.sfx.playKiGather(); // 🔊 기 모으기 성공 (단독 발동)
               const results = this.skillSystem.trigger({
                 type: 'ki_gather_success',
                 context: { player: this.gameState.player, enemy: this.enemy, slotIndex: roundIndex },
@@ -962,7 +978,7 @@ export class BattleScene extends Phaser.Scene {
     else if (enemyKiCost > playerKiCost) priority = 'enemy_first';
     else priority = 'simultaneous';
 
-    type PlayerBattleType = 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'reactive' | 'swap_next' | 'reveal_all' | 'none';
+    type PlayerBattleType = 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'reactive' | 'swap_next' | 'reveal_all' | 'delete_enemy_last' | 'none';
     let playerBattleType: PlayerBattleType = 'none';
     let playerCardValid = false;
 
@@ -983,6 +999,7 @@ export class BattleScene extends Phaser.Scene {
         else if (effectType === 'mark')                            playerBattleType = 'mark';
         else if (effectType === 'swap_next')                       playerBattleType = 'swap_next';
         else if (effectType === 'reveal_all')                      playerBattleType = 'reveal_all';
+        else if (effectType === 'delete_enemy_last')               playerBattleType = 'delete_enemy_last';
         else if (effectType === 'counter' || effectType === 'ki_block' ||
                  effectType === 'ambush' || effectType === 'react_dodge') {
           playerBattleType = 'reactive';
@@ -1280,7 +1297,7 @@ export class BattleScene extends Phaser.Scene {
   private async executePlayerAction(
     playerCard: CardInstance | null,
     playerCardValid: boolean,
-    playerBattleType: 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'reactive' | 'swap_next' | 'reveal_all' | 'none',
+    playerBattleType: 'ki_gather' | 'attack' | 'defend' | 'steal' | 'mark' | 'reactive' | 'swap_next' | 'reveal_all' | 'delete_enemy_last' | 'none',
     playerSlot: SlotUI,
     slotIndex: number,
     enemyAction: EnemyAction,
@@ -1313,6 +1330,7 @@ export class BattleScene extends Phaser.Scene {
         }
         const gained = this.gameState.player.gainKi(playerCard.data.effect.value);
         this.addBattleLog(`✨ [${playerCard.data.name}]: 기 +${gained}`);
+        this.sfx.playKiGather(); // 🔊 기 모으기 성공
         await playerSlot.flashExecuted();
 
         const enemyEffective = (enemyBattleType === 'attack') && !enemyAttackMissed;
@@ -1479,6 +1497,22 @@ export class BattleScene extends Phaser.Scene {
         break;
       }
 
+      case 'delete_enemy_last': {
+        this.gameState.player.spendKi(kiCost);
+        if (playerCard.usesLeft !== null) playerCard.usesLeft -= 1;
+        this.updateKiGauges();
+        if (this.currentRemainingEnemyQueueRef && this.currentRemainingEnemyQueueRef.length > 0) {
+          const removed = this.currentRemainingEnemyQueueRef.pop()!;
+          this.addBattleLog(`🚫 [기공파 차단]: 적의 마지막 행동 [${removed.action.name}] 제거!`);
+          // 제거된 슬롯 표시
+          this.flashEnemySlotBg(removed.slotIdx, 0x444444);
+        } else {
+          this.addBattleLog(`🚫 [기공파 차단]: 제거할 적 행동이 없다.`);
+        }
+        await playerSlot.flashExecuted();
+        break;
+      }
+
       default:
         break;
     }
@@ -1544,6 +1578,7 @@ export class BattleScene extends Phaser.Scene {
         if (isPierce) this.enemy.cancelCommand();
       } else if (playerBlocking && !isPierce) {
         this.addBattleLog(`🛡️ 막기로 [${enemyAction.name}] 상쇄!`);
+        this.sfx.playBlockSuccess(); // 🔊 막기 성공
       } else {
         if (isPierce && playerBlocking) {
           this.addBattleLog(`⚔️ [관통 공격] 막기를 무시하고 관통!`);
@@ -1553,6 +1588,7 @@ export class BattleScene extends Phaser.Scene {
         let finalDamage = enemyResult.damage;
 
         if (playerBattleType === 'ki_gather' && playerCardValid) {
+          this.sfx.playKiInterrupt(); // 🔊 기 모으다 공격당함
           const results = this.skillSystem.trigger({
             type: 'ki_gather_while_attacked',
             context: { player: this.gameState.player, enemy: this.enemy, slotIndex },
@@ -1560,6 +1596,8 @@ export class BattleScene extends Phaser.Scene {
           for (const r of results) {
             if (r.extraDamage) finalDamage += r.extraDamage;
           }
+        } else {
+          this.sfx.playEnemyHit(); // 🔊 일반 피격
         }
 
         const actualDmg = this.gameState.player.takeDamage(finalDamage);
@@ -1684,6 +1722,7 @@ export class BattleScene extends Phaser.Scene {
       } else {
         this.addBattleLog(`⚡ [${card.data.name}]: 적에게 ${dmg} 피해!`);
       }
+      this.sfx.playAttackHit(); // 🔊 공격 성공
       await this.showDamageEffect(false, dmg);
 
       const results = this.skillSystem.trigger({
