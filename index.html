@@ -487,6 +487,11 @@ body {
 }
 .slot-glow-gold { animation: glow-gold-anim 0.5s ease-in-out; }
 .slot-glow-red  { animation: glow-red-anim  0.5s ease-in-out; }
+@keyframes explosion {
+  0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+  50% { transform: translate(-50%, -50%) scale(3); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(5); opacity: 0; }
+}
 </style>
 </head>
 <body>
@@ -750,7 +755,29 @@ const SFX = (() => {
     document.removeEventListener('click', _once);
   }, { once: true });
 
-  return { attackHit, kiGather, blockSuccess, kiInterrupt, enemyHit };
+  // 폭발 - 동시 에너지 충돌
+  function explosion() {
+    if (!ready) return;
+    resume();
+    const now = ctx.currentTime;
+    // 노이즈 버스트 (큰 폭발음)
+    const bufSize = ctx.sampleRate * 0.4;
+    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/bufSize, 1.5);
+    const noise = ctx.createBufferSource(); noise.buffer = buf;
+    const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = 800;
+    const g = ctx.createGain(); g.gain.setValueAtTime(1.5, now); g.gain.exponentialRampToValueAtTime(0.001, now+0.4);
+    noise.connect(filt); filt.connect(g); g.connect(master);
+    noise.start(now); noise.stop(now+0.45);
+    // 저음 펀치
+    const osc = ctx.createOscillator(); osc.type = "sine";
+    osc.frequency.setValueAtTime(80, now); osc.frequency.exponentialRampToValueAtTime(30, now+0.3);
+    const og = ctx.createGain(); og.gain.setValueAtTime(1.2, now); og.gain.exponentialRampToValueAtTime(0.001, now+0.3);
+    osc.connect(og); og.connect(master); osc.start(now); osc.stop(now+0.32);
+  }
+
+  return { attackHit, kiGather, blockSuccess, kiInterrupt, enemyHit, explosion };
 })();
 
 // ============================================================
@@ -1439,7 +1466,7 @@ class BattleGame {
       case 'block': {
         gs.player.isBlocking=true;
         this.addLog(`🛡 [${card.data.name}]: 막기 준비!`,'player');
-        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
+        await this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
         if(this.enemy.type==='boss'&&this.enemy.passives.includes('infinite_cloak')) {
           this.enemy.addKi(1);
           this.addLog('🌀 [무한의 망토] 발동! 적 기+1','passive');
@@ -1455,7 +1482,7 @@ class BattleGame {
         gs.player.isDodging=true;
         if(isEnemyAttack) this.addLog(`💨 [${card.data.name}]: 선공 순간이동 → 적 공격 회피!`,'player');
         else this.addLog(`💨 [${card.data.name}]: 회피 준비!`,'player');
-        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
+        await this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
         break;
       }
       case 'damage': {
@@ -1623,12 +1650,37 @@ class BattleGame {
 
       if(enemyAction.type==='regenerate'&&playerDmg>=3) this.enemy.cancelRegeneration();
 
+      // 동시 충돌 애니메이션
+      const pSlotEl=document.getElementById(`player-slot-${slotIdx}`);
+      const eSlotEl=document.getElementById(`enemy-slot-${slotIdx}`);
+      const cx=window.innerWidth/2, cy=window.innerHeight/2;
+      // 두 투사체를 중앙까지 동시 발사
+      const makeProj=(fromEl, emoji, color) => {
+        const fR=fromEl.getBoundingClientRect();
+        const fX=fR.left+fR.width/2, fY=fR.top+fR.height/2;
+        const proj=document.createElement('div');
+        proj.style.cssText=`position:fixed;left:${fX}px;top:${fY}px;transform:translate(-50%,-50%);font-size:22px;pointer-events:none;z-index:9999;transition:left 0.25s ease-in,top 0.25s ease-in;`;
+        proj.textContent=emoji;
+        document.body.appendChild(proj);
+        return proj;
+      };
+      const pProj=makeProj(pSlotEl,'⚡','#ffff44');
+      const eProj=makeProj(eSlotEl,'🔥','#ff4444');
+      await this._wait(20);
+      pProj.style.left=cx+'px'; pProj.style.top=cy+'px';
+      eProj.style.left=cx+'px'; eProj.style.top=cy+'px';
+      await this._wait(270);
+      pProj.remove(); eProj.remove();
+      // 폭발 이펙트 + 사운드
+      this._showExplosion(cx, cy);
+      SFX.explosion();
+      this.addLog(`💥 동시 에너지 충돌! (플레이어 ${playerDmg} vs 적 ${enemyDmg})`,'system');
+      await this._wait(300);
+
       if(netPlayerDmg>0) {
         const actual=this.enemy.takeDamage(netPlayerDmg); gs.recordDamageDealt(actual);
         SFX.attackHit(); // 🔊 공격 성공
         this.addLog(`⚡ [${playerCard.data.name}]: 상쇄 후 적에게 ${actual} 피해!`,'player');
-      } else if(playerDmg>0) {
-        this.addLog(`💥 동시 공격: 데미지 완전 상쇄! (플레이어 ${playerDmg} vs 적 ${enemyDmg})`,'system');
       }
       if(netEnemyDmg>0&&!gs.player.isDodging) {
         const actualDmg=gs.player.takeDamage(netEnemyDmg); gs.recordDamageTaken(actualDmg);
@@ -1839,7 +1891,24 @@ class BattleGame {
     proj.remove();
   }
 
+  _showExplosion(x, y) {
+    const exp = document.createElement("div");
+    exp.style.cssText = `
+      position: fixed; left: ${x}px; top: ${y}px;
+      transform: translate(-50%, -50%);
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #ffffff, #ffff00, #ff8800, #ff0000);
+      animation: explosion 0.5s ease-out forwards;
+      z-index: 9999;
+      pointer-events: none;
+    `;
+    document.body.appendChild(exp);
+    setTimeout(() => exp.remove(), 600);
+  }
+
   async _slideBack(el, direction='down') {
+    if(!el) return;
     const dy=direction==='down'?20:-20;
     el.style.transition='transform 0.2s ease-out';
     el.style.transform=`translateY(${dy}px)`;
