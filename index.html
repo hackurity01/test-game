@@ -470,6 +470,23 @@ body {
 .anim-victory { animation: pulse-green 1s infinite; }
 .anim-defeat { animation: pulse-red 1s infinite; }
 .fade-in { animation: fadeIn 0.3s ease; }
+
+/* ===== BATTLE ANIMATION EXTRAS ===== */
+.slot-active-big {
+  transform: scale(1.15) !important;
+  z-index: 10;
+  transition: transform 0.2s ease;
+}
+@keyframes glow-gold-anim {
+  0%,100% { box-shadow: 0 0 8px 4px #ffcc00; }
+  50% { box-shadow: 0 0 24px 12px #ffee44; }
+}
+@keyframes glow-red-anim {
+  0%,100% { box-shadow: 0 0 8px 4px #ff2200; }
+  50% { box-shadow: 0 0 24px 12px #ff6600; }
+}
+.slot-glow-gold { animation: glow-gold-anim 0.5s ease-in-out; }
+.slot-glow-red  { animation: glow-red-anim  0.5s ease-in-out; }
 </style>
 </head>
 <body>
@@ -1227,7 +1244,7 @@ class BattleGame {
       this._updateHpBars();
     }
     this._revealEnemySlot(0); this._revealEnemySlot(1); this._revealEnemySlot(2);
-    await this._wait(500);
+    await this._wait(800);
     gs.player.onTurnStart();
     for(let i=0;i<3;i++) {
       if(gs.player.isDead()||this.enemy.isDead()) break;
@@ -1235,21 +1252,25 @@ class BattleGame {
       await this._executeSlot(i);
       this._clearActiveSlot();
       this._updateAllUI();
-      await this._wait(400);
+      await this._wait(1000);
     }
     this._checkBattleResult();
   }
 
   _setActiveSlot(idx) {
     for(let i=0;i<3;i++) {
-      document.getElementById(`enemy-slot-${i}`).classList.toggle('active-slot',i===idx);
-      document.getElementById(`player-slot-${i}`).classList.toggle('active-slot',i===idx);
+      const eEl=document.getElementById(`enemy-slot-${i}`);
+      const pEl=document.getElementById(`player-slot-${i}`);
+      eEl.classList.toggle('active-slot',i===idx);
+      pEl.classList.toggle('active-slot',i===idx);
+      eEl.classList.toggle('slot-active-big',i===idx);
+      pEl.classList.toggle('slot-active-big',i===idx);
     }
   }
   _clearActiveSlot() {
     for(let i=0;i<3;i++) {
-      document.getElementById(`enemy-slot-${i}`).classList.remove('active-slot');
-      document.getElementById(`player-slot-${i}`).classList.remove('active-slot');
+      document.getElementById(`enemy-slot-${i}`).classList.remove('active-slot','slot-active-big');
+      document.getElementById(`player-slot-${i}`).classList.remove('active-slot','slot-active-big');
     }
   }
 
@@ -1403,8 +1424,9 @@ class BattleGame {
           const gained=gs.player.gainKi(card.data.effect.value);
           this.addLog(`✨ [${card.data.name}]: 기 +${gained}`,'player');
           if(!isEnemyAttack) {
-            // 기 모으기 성공 사운드
+            // 기 모으기 성공 사운드 + glow
             SFX.kiGather();
+            this._glowSlot(document.getElementById(`player-slot-${slotIdx}`),'gold');
             if(this._hasPassive('passive_meditate')) {
               gs.player.gainKi(1); this._updateKiDots();
               this.addLog('🧘 [명상] 기모으기 기 +1 추가!','passive');
@@ -1417,6 +1439,7 @@ class BattleGame {
       case 'block': {
         gs.player.isBlocking=true;
         this.addLog(`🛡 [${card.data.name}]: 막기 준비!`,'player');
+        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
         if(this.enemy.type==='boss'&&this.enemy.passives.includes('infinite_cloak')) {
           this.enemy.addKi(1);
           this.addLog('🌀 [무한의 망토] 발동! 적 기+1','passive');
@@ -1432,6 +1455,7 @@ class BattleGame {
         gs.player.isDodging=true;
         if(isEnemyAttack) this.addLog(`💨 [${card.data.name}]: 선공 순간이동 → 적 공격 회피!`,'player');
         else this.addLog(`💨 [${card.data.name}]: 회피 준비!`,'player');
+        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
         break;
       }
       case 'damage': {
@@ -1498,9 +1522,13 @@ class BattleGame {
       this.addLog('⚡ 강한 공격으로 피콜로 재생 효과 무효화!','system');
     }
 
+    const pSlotEl=document.getElementById(`player-slot-${slotIdx}`);
+    const eSlotEl=document.getElementById(`enemy-slot-${slotIdx}`);
     if(enemyIsDefend) {
+      await this._shootProjectile(pSlotEl, eSlotEl, '#ffff44', '⚡', 'block');
       this.addLog(`🛡 적이 막기로 [${card.data.name}]을 막았다!`,'enemy');
     } else {
+      await this._shootProjectile(pSlotEl, eSlotEl, '#ffff44', '⚡', 'hit');
       const actual=this.enemy.takeDamage(dmg); gs.recordDamageDealt(actual);
       SFX.attackHit(); // 🔊 공격 성공
       this.addLog(`⚡ [${card.data.name}]: 적에게 ${actual} 피해!`,'player');
@@ -1520,9 +1548,17 @@ class BattleGame {
   async _doEnemyAction(enemyAction, slotIdx, playerEffType, playerValid, alreadyDone) {
     const res=this.enemy.executeAction(enemyAction);
     if(res.skipped) { this.addLog(`❌ 적 [${enemyAction.name}]: 기 부족 → 무효`,'system'); return; }
-    if(res.kiGained>0) { this.addLog(`⚡ 적 기모으기: +${res.kiGained}`,'enemy'); }
+    const eSlotEl=document.getElementById(`enemy-slot-${slotIdx}`);
+    const pSlotEl=document.getElementById(`player-slot-${slotIdx}`);
+    if(res.kiGained>0) {
+      this.addLog(`⚡ 적 기모으기: +${res.kiGained}`,'enemy');
+      this._glowSlot(eSlotEl,'red');
+    }
     this._updateKiDots();
 
+    if(enemyAction.type==='defend') {
+      this._slideBack(eSlotEl,'up');
+    }
     if(enemyAction.type==='regenerate') {
       if(this.enemy.regenerationCancelled) this.addLog('💔 [재생집중] 강한 공격으로 재생 무효화됨!','system');
       else this.addLog(`💚 [재생집중] 피콜로 HP +2 회복!`,'passive');
@@ -1539,9 +1575,11 @@ class BattleGame {
       const isKiGather=playerEffType==='ki_gain';
 
       if(playerDodging) {
+        await this._shootProjectile(eSlotEl, pSlotEl, '#ff4444', '🔥', 'dodge');
         this.addLog(`💨 순간이동으로 [${enemyAction.name}] 회피!`,'player');
         if(isPierce) this.enemy.cancelCommand();
       } else if(playerBlocking&&!isPierce) {
+        await this._shootProjectile(eSlotEl, pSlotEl, '#ff4444', '🔥', 'block');
         SFX.blockSuccess(); // 🔊 막기 성공
         this.addLog(`🛡 막기로 [${enemyAction.name}] 상쇄!`,'player');
       } else {
@@ -1549,6 +1587,7 @@ class BattleGame {
           this.addLog(`⚔️ [관통 공격] 막기를 무시하고 관통!`,'enemy');
           this.enemy.cancelCommand();
         }
+        await this._shootProjectile(eSlotEl, pSlotEl, '#ff4444', '🔥', 'hit');
         let finalDmg=res.damage;
         if(isKiGather&&playerValid&&this._hasPassive('passive_meditate')) finalDmg+=1;
         const actualDmg=gs.player.takeDamage(finalDmg); gs.recordDamageTaken(actualDmg);
@@ -1771,6 +1810,50 @@ class BattleGame {
     this.infoPopupOpen=false;
     const p=document.getElementById('enemy-info-popup');
     if(p) p.remove();
+  }
+
+  async _shootProjectile(fromEl, toEl, color='#ffff44', emoji='⚡', mode='hit') {
+    const fR=fromEl.getBoundingClientRect(), tR=toEl.getBoundingClientRect();
+    const fX=fR.left+fR.width/2, fY=fR.top+fR.height/2;
+    const tX=tR.left+tR.width/2, tY=tR.top+tR.height/2;
+    const proj=document.createElement('div');
+    proj.style.cssText=`position:fixed;left:${fX}px;top:${fY}px;transform:translate(-50%,-50%);font-size:22px;pointer-events:none;z-index:9999;transition:left 0.25s ease-in,top 0.25s ease-in,opacity 0.25s;`;
+    proj.textContent=emoji;
+    document.body.appendChild(proj);
+    await this._wait(20);
+    let dX=tX, dY=tY;
+    if(mode==='dodge'){ dX=tX+(Math.random()>0.5?50:-50); dY=tY-40; proj.style.opacity='0.3'; }
+    proj.style.left=dX+'px'; proj.style.top=dY+'px';
+    await this._wait(280);
+    if(mode==='hit'||mode==='block') {
+      const exp=document.createElement('div');
+      const expColor=mode==='block'?'#4488ff':color;
+      exp.style.cssText=`position:fixed;left:${dX}px;top:${dY}px;transform:translate(-50%,-50%) scale(0.3);width:44px;height:44px;border-radius:50%;background:${expColor};opacity:1;pointer-events:none;z-index:9999;transition:transform 0.25s ease-out,opacity 0.25s ease-out;`;
+      document.body.appendChild(exp);
+      await this._wait(20);
+      exp.style.transform='translate(-50%,-50%) scale(2.8)';
+      exp.style.opacity='0';
+      await this._wait(270);
+      exp.remove();
+    }
+    proj.remove();
+  }
+
+  async _slideBack(el, direction='down') {
+    const dy=direction==='down'?20:-20;
+    el.style.transition='transform 0.2s ease-out';
+    el.style.transform=`translateY(${dy}px)`;
+    await this._wait(200);
+    el.style.transition='transform 0.2s ease-in';
+    el.style.transform='';
+    await this._wait(200);
+  }
+
+  async _glowSlot(el, color='gold') {
+    const cls=color==='gold'?'slot-glow-gold':'slot-glow-red';
+    el.classList.add(cls);
+    await this._wait(500);
+    el.classList.remove(cls);
   }
 
   async _wait(ms) { return new Promise(r=>setTimeout(r,ms)); }
