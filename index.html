@@ -1463,7 +1463,7 @@ class BattleGame {
         gs.player.isBlocking=true;
         this.addLog(`🛡 [${card.data.name}]: 막기 준비!`,'player');
         // 0.5초 후 slideBack (투사체가 날아오는 타이밍에 맞춰 물러남)
-        setTimeout(()=>this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'), 500);
+        setTimeout(()=>this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'), 300);
         if(this.enemy.type==='boss'&&this.enemy.passives.includes('infinite_cloak')) {
           this.enemy.addKi(1);
           this.addLog('🌀 [무한의 망토] 발동! 적 기+1','passive');
@@ -1479,7 +1479,7 @@ class BattleGame {
         gs.player.isDodging=true;
         if(isEnemyAttack) this.addLog(`💨 [${card.data.name}]: 선공 순간이동 → 적 공격 회피!`,'player');
         else this.addLog(`💨 [${card.data.name}]: 회피 준비!`,'player');
-        setTimeout(()=>this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'), 500);
+        setTimeout(()=>this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'), 300);
         break;
       }
       case 'damage': {
@@ -1582,7 +1582,7 @@ class BattleGame {
     this._updateKiDots();
 
     if(enemyAction.type==='defend') {
-      this._slideBack(eSlotEl,'up');
+      setTimeout(()=>this._slideBack(eSlotEl,"up"),300);
     }
     if(enemyAction.type==='regenerate') {
       if(this.enemy.regenerationCancelled) this.addLog('💔 [재생집중] 강한 공격으로 재생 무효화됨!','system');
@@ -1636,58 +1636,78 @@ class BattleGame {
       const mark=this.enemy.consumeMark();
       const markMult=1+mark;
       let playerDmg=Math.floor(playerCard.data.effect.value*markMult);
-      if(mark>0) this.addLog(`🎯 표식 ${mark}중첩! ×${markMult}`,'player');
+      if(mark>0) this.addLog(`🎯 표식 ${mark}중첩! ×${markMult}`,player);
       const enemyDmg=enemyAction.damage||0;
       const netPlayerDmg=Math.max(0,playerDmg-enemyDmg);
       const netEnemyDmg=Math.max(0,enemyDmg-playerDmg);
-
       gs.player.spendKi(kiCost);
       if(playerCard.usesLeft!==null) playerCard.usesLeft-=1;
       const res=this.enemy.executeAction(enemyAction);
       this._updateKiDots();
-
-      if(enemyAction.type==='regenerate'&&playerDmg>=3) this.enemy.cancelRegeneration();
-
-      // 동시 충돌 애니메이션
+      if(enemyAction.type==="regenerate"&&playerDmg>=3) this.enemy.cancelRegeneration();
       const pSlotEl=document.getElementById(`player-slot-${slotIdx}`);
       const eSlotEl=document.getElementById(`enemy-slot-${slotIdx}`);
-      // 실제 두 슬롯의 중간 좌표 계산
       const pR=pSlotEl.getBoundingClientRect();
       const eR=eSlotEl.getBoundingClientRect();
       const pX=pR.left+pR.width/2, pY=pR.top+pR.height/2;
       const eX=eR.left+eR.width/2, eY=eR.top+eR.height/2;
       const cx=(pX+eX)/2, cy=(pY+eY)/2;
-
-      // 두 투사체를 중간 지점까지 동시 발사
-      const makeProj=(fromX, fromY, emoji) => {
-        const proj=document.createElement('div');
-        proj.style.cssText=`position:fixed;left:${fromX}px;top:${fromY}px;transform:translate(-50%,-50%);font-size:24px;pointer-events:none;z-index:9999;transition:left 0.28s ease-in,top 0.28s ease-in;`;
-        proj.textContent=emoji;
-        document.body.appendChild(proj);
-        return proj;
+      const makeProj=(fromX,fromY,emoji)=>{
+        const el=document.createElement("div");
+        el.style.cssText=`position:fixed;left:${fromX}px;top:${fromY}px;transform:translate(-50%,-50%);font-size:26px;pointer-events:none;z-index:9999;transition:left 0.3s ease-in,top 0.3s ease-in;`;
+        el.textContent=emoji;
+        document.body.appendChild(el);
+        return el;
       };
-      const pProj=makeProj(pX,pY,'⚡');
-      const eProj=makeProj(eX,eY,'🔥');
-      await this._wait(20);
-      pProj.style.left=cx+'px'; pProj.style.top=cy+'px';
-      eProj.style.left=cx+'px'; eProj.style.top=cy+'px';
-      await this._wait(300);
-      pProj.remove(); eProj.remove();
-      // 폭발 이펙트 + 사운드
-      this._showExplosion(cx, cy);
-      SFX.explosion();
-      this.addLog(`💥 동시 에너지 충돌! (플레이어 ${playerDmg} vs 적 ${enemyDmg})`,'system');
-      await this._wait(300);
-
-      if(netPlayerDmg>0) {
+      const pProj=makeProj(pX,pY,"⚡");
+      const eProj=makeProj(eX,eY,"🔥");
+      if(netPlayerDmg===0&&netEnemyDmg===0) {
+        await this._wait(20);
+        pProj.style.left=cx+"px"; pProj.style.top=cy+"px";
+        eProj.style.left=cx+"px"; eProj.style.top=cy+"px";
+        await this._wait(320);
+        pProj.remove(); eProj.remove();
+        this._showExplosion(cx,cy);
+        SFX.explosion();
+        this.addLog(`💥 동시 공격! 완전 상쇄 (플레이어 ${playerDmg} vs 적 ${enemyDmg})`,"system");
+      } else if(netPlayerDmg>0) {
+        await this._wait(20);
+        pProj.style.left=cx+"px"; pProj.style.top=cy+"px";
+        eProj.style.left=cx+"px"; eProj.style.top=cy+"px";
+        await this._wait(320);
+        eProj.remove();
+        this._showExplosion(cx,cy);
+        SFX.blockSuccess();
+        await this._wait(100);
+        pProj.style.transition="left 0.2s ease-out,top 0.2s ease-out";
+        pProj.style.left=eX+"px"; pProj.style.top=eY+"px";
+        await this._wait(220);
+        pProj.remove();
+        this._showExplosion(eX,eY);
+        SFX.attackHit();
+        this.addLog(`💥 동시 공격! 플레이어 우세 → 잔여 ${netPlayerDmg}뎀`,"system");
         const actual=this.enemy.takeDamage(netPlayerDmg); gs.recordDamageDealt(actual);
-        SFX.attackHit(); // 🔊 공격 성공
-        this.addLog(`⚡ [${playerCard.data.name}]: 상쇄 후 적에게 ${actual} 피해!`,'player');
-      }
-      if(netEnemyDmg>0&&!gs.player.isDodging) {
-        const actualDmg=gs.player.takeDamage(netEnemyDmg); gs.recordDamageTaken(actualDmg);
-        SFX.enemyHit(); // 🔊 피격
-        this.addLog(`💥 상쇄 후 ${actualDmg} 피해 받음!`,'enemy');
+        this.addLog(`⚡ 적에게 ${actual} 피해!`,"player");
+      } else {
+        await this._wait(20);
+        pProj.style.left=cx+"px"; pProj.style.top=cy+"px";
+        eProj.style.left=cx+"px"; eProj.style.top=cy+"px";
+        await this._wait(320);
+        pProj.remove();
+        this._showExplosion(cx,cy);
+        SFX.blockSuccess();
+        await this._wait(100);
+        eProj.style.transition="left 0.2s ease-out,top 0.2s ease-out";
+        eProj.style.left=pX+"px"; eProj.style.top=pY+"px";
+        await this._wait(220);
+        eProj.remove();
+        this._showExplosion(pX,pY);
+        SFX.enemyHit();
+        this.addLog(`💥 동시 공격! 적 우세 → 잔여 ${netEnemyDmg}뎀`,"system");
+        if(!gs.player.isDodging) {
+          const actualDmg=gs.player.takeDamage(netEnemyDmg); gs.recordDamageTaken(actualDmg);
+          this.addLog(`💥 ${actualDmg} 피해 받음!`,"enemy");
+        }
       }
       this._updateHpBars();
     } else {
