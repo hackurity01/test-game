@@ -1296,8 +1296,13 @@ class BattleGame {
   }
   _clearActiveSlot() {
     for(let i=0;i<3;i++) {
-      document.getElementById(`enemy-slot-${i}`).classList.remove('active-slot','slot-active-big');
-      document.getElementById(`player-slot-${i}`).classList.remove('active-slot','slot-active-big');
+      const eEl=document.getElementById(`enemy-slot-${i}`);
+      const pEl=document.getElementById(`player-slot-${i}`);
+      eEl.classList.remove('active-slot','slot-active-big');
+      pEl.classList.remove('active-slot','slot-active-big');
+      // 인라인 transform 잔여분도 초기화
+      eEl.style.transform='';
+      pEl.style.transform='';
     }
   }
 
@@ -1947,8 +1952,9 @@ class BattleGame {
     el.style.transition='transform 0.2s ease-in';
     el.style.transform=isActive?'scale(1.15)':'';
     await this._wait(210);
+    // 항상 인라인 style 초기화 (class로만 scale 관리)
     el.style.transition='';
-    if(!isActive) el.style.transform='';
+    el.style.transform='';
   }
 
   async _glowSlot(el, color='gold') {
