@@ -473,7 +473,7 @@ body {
 
 /* ===== BATTLE ANIMATION EXTRAS ===== */
 .slot-active-big {
-  transform: scale(1.15) !important;
+  transform: scale(1.15);
   z-index: 10;
   transition: transform 0.2s ease;
 }
@@ -1653,23 +1653,27 @@ class BattleGame {
       // 동시 충돌 애니메이션
       const pSlotEl=document.getElementById(`player-slot-${slotIdx}`);
       const eSlotEl=document.getElementById(`enemy-slot-${slotIdx}`);
-      const cx=window.innerWidth/2, cy=window.innerHeight/2;
-      // 두 투사체를 중앙까지 동시 발사
-      const makeProj=(fromEl, emoji, color) => {
-        const fR=fromEl.getBoundingClientRect();
-        const fX=fR.left+fR.width/2, fY=fR.top+fR.height/2;
+      // 실제 두 슬롯의 중간 좌표 계산
+      const pR=pSlotEl.getBoundingClientRect();
+      const eR=eSlotEl.getBoundingClientRect();
+      const pX=pR.left+pR.width/2, pY=pR.top+pR.height/2;
+      const eX=eR.left+eR.width/2, eY=eR.top+eR.height/2;
+      const cx=(pX+eX)/2, cy=(pY+eY)/2;
+
+      // 두 투사체를 중간 지점까지 동시 발사
+      const makeProj=(fromX, fromY, emoji) => {
         const proj=document.createElement('div');
-        proj.style.cssText=`position:fixed;left:${fX}px;top:${fY}px;transform:translate(-50%,-50%);font-size:22px;pointer-events:none;z-index:9999;transition:left 0.25s ease-in,top 0.25s ease-in;`;
+        proj.style.cssText=`position:fixed;left:${fromX}px;top:${fromY}px;transform:translate(-50%,-50%);font-size:24px;pointer-events:none;z-index:9999;transition:left 0.28s ease-in,top 0.28s ease-in;`;
         proj.textContent=emoji;
         document.body.appendChild(proj);
         return proj;
       };
-      const pProj=makeProj(pSlotEl,'⚡','#ffff44');
-      const eProj=makeProj(eSlotEl,'🔥','#ff4444');
+      const pProj=makeProj(pX,pY,'⚡');
+      const eProj=makeProj(eX,eY,'🔥');
       await this._wait(20);
       pProj.style.left=cx+'px'; pProj.style.top=cy+'px';
       eProj.style.left=cx+'px'; eProj.style.top=cy+'px';
-      await this._wait(270);
+      await this._wait(300);
       pProj.remove(); eProj.remove();
       // 폭발 이펙트 + 사운드
       this._showExplosion(cx, cy);
@@ -1910,12 +1914,16 @@ class BattleGame {
   async _slideBack(el, direction='down') {
     if(!el) return;
     const dy=direction==='down'?20:-20;
-    el.style.transition='transform 0.2s ease-out';
-    el.style.transform=`translateY(${dy}px)`;
-    await this._wait(200);
+    const isActive=el.classList.contains('slot-active-big');
+    const baseScale=isActive?'scale(1.15) ':'';
+    el.style.transition='transform 0.15s ease-out';
+    el.style.transform=`${baseScale}translateY(${dy}px)`;
+    await this._wait(160);
     el.style.transition='transform 0.2s ease-in';
-    el.style.transform='';
-    await this._wait(200);
+    el.style.transform=isActive?'scale(1.15)':'';
+    await this._wait(210);
+    el.style.transition='';
+    if(!isActive) el.style.transform='';
   }
 
   async _glowSlot(el, color='gold') {
