@@ -1348,16 +1348,12 @@ class BattleGame {
 
     const dodgeSucceeds=isPlayerDodge&&isEnemyAttack&&(priority==='player_first'||priority==='simultaneous');
 
-    if(priority==='player_first') {
-      await this._doPlayerAction(playerCard, playerValid, playerEffType, slotIdx, enemyAction, playerKiCost);
-      await this._doEnemyAction(enemyAction, slotIdx, playerEffType, playerValid, false);
-    } else if(priority==='enemy_first') {
-      await this._doEnemyAction(enemyAction, slotIdx, playerEffType, playerValid, false);
-      const dodgeFail=isPlayerDodge&&isEnemyAttack;
-      await this._doPlayerAction(playerCard, playerValid&&!dodgeFail, playerEffType, slotIdx, enemyAction, playerKiCost);
-    } else {
-      await this._doSimultaneous(playerCard, playerValid, playerEffType, slotIdx, enemyAction, playerKiCost, dodgeSucceeds);
-    }
+    const dodgeFail=isPlayerDodge&&isEnemyAttack&&priority==='enemy_first';
+    // 모든 경우 플레이어/적 애니메이션 동시 실행
+    await Promise.all([
+      this._doPlayerAction(playerCard, playerValid&&!dodgeFail, playerEffType, slotIdx, enemyAction, playerKiCost),
+      this._doEnemyAction(enemyAction, slotIdx, playerEffType, playerValid, false)
+    ]);
   }
 
   async _executeReactive(card, slotIdx, enemyAction, actualKiCost) {
@@ -1466,7 +1462,7 @@ class BattleGame {
       case 'block': {
         gs.player.isBlocking=true;
         this.addLog(`🛡 [${card.data.name}]: 막기 준비!`,'player');
-        await this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
+        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'); // 동시 실행 (await 제거)
         if(this.enemy.type==='boss'&&this.enemy.passives.includes('infinite_cloak')) {
           this.enemy.addKi(1);
           this.addLog('🌀 [무한의 망토] 발동! 적 기+1','passive');
@@ -1482,7 +1478,7 @@ class BattleGame {
         gs.player.isDodging=true;
         if(isEnemyAttack) this.addLog(`💨 [${card.data.name}]: 선공 순간이동 → 적 공격 회피!`,'player');
         else this.addLog(`💨 [${card.data.name}]: 회피 준비!`,'player');
-        await this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down');
+        this._slideBack(document.getElementById(`player-slot-${slotIdx}`),'down'); // 동시 실행
         break;
       }
       case 'damage': {
@@ -1693,8 +1689,10 @@ class BattleGame {
       }
       this._updateHpBars();
     } else {
-      await this._doPlayerAction(playerCard, playerValid, effType, slotIdx, enemyAction, kiCost);
-      await this._doEnemyAction(enemyAction, slotIdx, effType, playerValid, false);
+      await Promise.all([
+        this._doPlayerAction(playerCard, playerValid, effType, slotIdx, enemyAction, kiCost),
+        this._doEnemyAction(enemyAction, slotIdx, effType, playerValid, false)
+      ]);
     }
   }
 
