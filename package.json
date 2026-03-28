@@ -1,0 +1,18 @@
+{
+  "name": "dragonball-roguelite",
+  "version": "0.1.0",
+  "description": "드래곤볼 쎄쎄쎄 기반 2슬롯 덱빌딩 로그라이트",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.60.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vite": "^4.4.0",
+    "vite-plugin-singlefile": "^2.3.2"
+  }
+}
