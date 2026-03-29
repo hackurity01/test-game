@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Spell Battle Prototype</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; min-width: 900px; }
+h1 { text-align: center; margin-bottom: 20px; font-size: 1.6em; letter-spacing: 2px; }
+
+#status-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #16213e; padding: 15px 20px; border-radius: 8px; margin-bottom: 12px;
+}
+.hp-section { width: 38%; }
+.hp-section.right { text-align: right; }
+.hp-section h3 { margin-bottom: 6px; font-size: 0.95em; }
+.hp-bar-outer { background: #2a2a4a; height: 18px; border-radius: 4px; margin-bottom: 4px; }
+.hp-bar-inner { height: 100%; border-radius: 4px; background: #4CAF50; transition: width 0.2s; }
+.hp-bar-inner.low { background: #e53935; }
+.hp-bar-inner.mid { background: #fb8c00; }
+.hp-val { font-size: 0.85em; color: #aaa; }
+
+#round-info { text-align: center; font-size: 0.9em; line-height: 1.8; }
+#round-info .mana-val { color: #64b5f6; font-size: 1.1em; font-weight: bold; }
+#phase-label { color: #ffd700; font-size: 0.85em; }
+
+#message { min-height: 22px; font-size: 0.85em; color: #ff9800; margin-bottom: 10px; padding: 2px 0; }
+#message.err { color: #ef5350; }
+
+.section { background: #16213e; padding: 12px 15px; border-radius: 8px; margin-bottom: 12px; }
+.section-title { font-size: 0.85em; color: #888; margin-bottom: 10px; }
+
+.timeline { display: flex; gap: 4px; }
+.slot {
+  width: 74px; min-height: 64px; border: 2px solid #2a2a4a; border-radius: 5px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: 4px 3px; cursor: pointer; background: #0d2137; position: relative;
+  transition: border-color 0.15s;
+}
+.slot:hover { border-color: #4a90d9; }
+.slot.occupied { background: #112a40; border-color: #2a4a6a; cursor: default; }
+.slot.occupied:hover { border-color: #2a4a6a; }
+.slot.fire-slot { border-color: #e67e00 !important; }
+.slot.selectable:hover { border-color: #64b5f6 !important; background: #0f2f50 !important; cursor: pointer; }
+.slot-num { font-size: 0.7em; color: #555; margin-bottom: 3px; }
+.slot-name { font-size: 0.8em; font-weight: bold; color: #ffd700; text-align: center; line-height: 1.2; }
+.slot-tag { font-size: 0.68em; color: #aaa; margin-top: 2px; text-align: center; }
+.slot-tag.casting { color: #668; }
+.slot-tag.fires { color: #e67e00; }
+.slot-tag.attack { color: #ef9a9a; }
+.slot-tag.defense { color: #64b5f6; }
+.slot-tag.heal { color: #a5d6a7; }
+
+.ai-section .slot { cursor: default; }
+.ai-section .slot:hover { border-color: #2a2a4a; }
+.ai-section .slot.occupied { background: #1f0d0d; border-color: #4a2a2a; }
+
+.spell-cards { display: flex; gap: 8px; flex-wrap: wrap; }
+.spell-card {
+  border: 2px solid #2a2a4a; border-radius: 6px; padding: 10px 12px; cursor: pointer;
+  background: #0d2137; min-width: 110px; transition: border-color 0.15s, background 0.15s;
+}
+.spell-card:hover:not(.disabled) { border-color: #4a90d9; background: #0f2f50; }
+.spell-card.selected { border-color: #ffd700 !important; background: #1a2e10 !important; }
+.spell-card.disabled { opacity: 0.35; cursor: not-allowed; }
+.card-name { font-weight: bold; font-size: 0.9em; margin-bottom: 4px; }
+.card-stat { font-size: 0.72em; color: #999; line-height: 1.5; }
+.card-mana { font-size: 0.75em; color: #64b5f6; margin-top: 4px; }
+.card-type { font-size: 0.68em; color: #888; }
+
+#controls { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+button {
+  padding: 9px 18px; border: none; border-radius: 5px; cursor: pointer;
+  font-size: 0.9em; font-family: monospace; font-weight: bold;
+}
+#btn-battle { background: #c62828; color: #fff; }
+#btn-battle:hover:not(:disabled) { background: #e53935; }
+#btn-battle:disabled { background: #3a2a2a; color: #666; cursor: not-allowed; }
+#btn-clear { background: #37474f; color: #ccc; }
+#btn-clear:hover:not(:disabled) { background: #455a64; }
+#btn-clear:disabled { background: #37474f; opacity: 0.4; cursor: not-allowed; }
+#btn-next { background: #1b5e20; color: #fff; display: none; }
+#btn-next:hover { background: #2e7d32; }
+#btn-restart { background: #e65100; color: #fff; display: none; }
+#btn-restart:hover { background: #f4511e; }
+
+#battle-log {
+  background: #090912; padding: 14px; border-radius: 8px; display: none;
+  max-height: 280px; overflow-y: auto; font-size: 0.85em; line-height: 1.6;
+}
+.log-line { padding: 1px 0; }
+.log-header { color: #ffd700; font-weight: bold; border-bottom: 1px solid #222; padding-bottom: 4px; margin-bottom: 4px; }
+.log-slot-header { color: #8888cc; margin-top: 8px; font-weight: bold; }
+.log-attack { color: #ef9a9a; }
+.log-defend { color: #90caf9; }
+.log-heal { color: #a5d6a7; }
+.log-blocked { color: #555; }
+.log-summary { color: #fff; font-weight: bold; border-top: 1px solid #333; margin-top: 8px; padding-top: 6px; }
+.log-result { color: #ffd700; font-size: 1.15em; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>SPELL BATTLE</h1>
+
+<div id="status-bar">
+  <div class="hp-section">
+    <h3>플레이어</h3>
+    <div class="hp-bar-outer"><div class="hp-bar-inner" id="p-bar" style="width:100%"></div></div>
+    <div class="hp-val" id="p-hp-val">HP: 30 / 30</div>
+  </div>
+  <div id="round-info">
+    <div>라운드 <span id="round-num">1</span> / 3</div>
+    <div>마나 <span class="mana-val" id="mana-val">10</span> / 10</div>
+    <div id="phase-label">배치 중</div>
+  </div>
+  <div class="hp-section right">
+    <h3>AI</h3>
+    <div class="hp-bar-outer"><div class="hp-bar-inner" id="a-bar" style="width:100%"></div></div>
+    <div class="hp-val" id="a-hp-val">HP: 30 / 30</div>
+  </div>
+</div>
+
+<div id="message">마법 카드를 선택하고 타임라인에서 시작 칸을 클릭해 배치하세요.</div>
+
+<div class="section">
+  <div class="section-title">플레이어 타임라인 — 마법 카드 선택 후 빈 칸 클릭 (주황 테두리 = 발동 칸)</div>
+  <div class="timeline" id="p-timeline"></div>
+</div>
+
+<div class="section ai-section">
+  <div class="section-title">AI 타임라인 — <span id="ai-label">전투 시작 전 숨겨짐</span></div>
+  <div class="timeline" id="a-timeline"></div>
+</div>
+
+<div class="section">
+  <div class="section-title">마법 카드 (선택 → 타임라인 클릭으로 배치)</div>
+  <div class="spell-cards" id="spell-cards"></div>
+</div>
+
+<div id="controls">
+  <button id="btn-battle" onclick="startBattle()">전투 시작</button>
+  <button id="btn-clear" onclick="clearTimeline()">배치 초기화</button>
+  <button id="btn-next" onclick="nextRound()">다음 라운드</button>
+  <button id="btn-restart" onclick="restartGame()">다시 시작</button>
+</div>
+
+<div id="battle-log"></div>
+
+<script>
+const SPELLS = [
+  { id: 'fireball',  name: '파이어볼', type: 'attack',  cast: 3, damage: 8,  mana: 3 },
+  { id: 'lightning', name: '번개',     type: 'attack',  cast: 1, damage: 4,  mana: 1 },
+  { id: 'shield',    name: '쉴드',     type: 'defense', cast: 2,             mana: 2 },
+  { id: 'heal',      name: '힐',       type: 'heal',    cast: 2, hp: 5,      mana: 2 },
+  { id: 'explosion', name: '폭발',     type: 'attack',  cast: 5, damage: 15, mana: 5 },
+];
+
+const MAX_HP = 30;
+const spell = id => SPELLS.find(s => s.id === id);
+
+let G = {}; // game state
+
+function init() {
+  G = {
+    pHP: MAX_HP, aHP: MAX_HP,
+    round: 1,
+    phase: 'placement', // placement | result | gameover
+    pSpells: [],  // [{id, start, end}]  0-indexed slots
+    aSpells: [],
+    selected: null,
+  };
+}
+
+// ---- helpers ----
+
+function usedMana(spells) {
+  return spells.reduce((s, ps) => s + spell(ps.id).mana, 0);
+}
+function freeMana() { return 10 - usedMana(G.pSpells); }
+
+function occupiedSlots(spells) {
+  const set = new Set();
+  spells.forEach(ps => { for (let i = ps.start; i <= ps.end; i++) set.add(i); });
+  return set;
+}
+
+function canPlace(spellId, start) {
+  const sp = spell(spellId);
+  const end = start + sp.cast - 1;
+  if (end >= 10) return { ok: false, msg: '타임라인 범위를 벗어납니다.' };
+  if (sp.mana > freeMana()) return { ok: false, msg: `마나 부족 (필요 ${sp.mana}, 남은 ${freeMana()})` };
+  const occ = occupiedSlots(G.pSpells);
+  for (let i = start; i <= end; i++) {
+    if (occ.has(i)) return { ok: false, msg: `${i+1}번 칸이 이미 사용 중입니다.` };
+  }
+  return { ok: true };
+}
+
+// ---- AI ----
+
+function aiDecide() {
+  let mana = 10;
+  const result = [];
+  const occ = new Set();
+  const target = 2 + Math.floor(Math.random() * 2); // 2 or 3
+
+  for (let attempt = 0; attempt < 60 && result.length < target; attempt++) {
+    const affordable = SPELLS.filter(s => s.mana <= mana);
+    if (!affordable.length) break;
+    const sp = affordable[Math.floor(Math.random() * affordable.length)];
+    const validStarts = [];
+    for (let s = 0; s <= 10 - sp.cast; s++) {
+      let ok = true;
+      for (let i = s; i < s + sp.cast; i++) { if (occ.has(i)) { ok = false; break; } }
+      if (ok) validStarts.push(s);
+    }
+    if (!validStarts.length) continue;
+    const start = validStarts[Math.floor(Math.random() * validStarts.length)];
+    const end = start + sp.cast - 1;
+    result.push({ id: sp.id, start, end });
+    for (let i = start; i <= end; i++) occ.add(i);
+    mana -= sp.mana;
+  }
+  G.aSpells = result;
+}
+
+// ---- Battle ----
+
+function processBattle() {
+  const log = [];
+  let pHP = G.pHP;
+  let aHP = G.aHP;
+
+  log.push({ cls: 'log-header', text: `=== 라운드 ${G.round} 전투 처리 ===` });
+
+  for (let slot = 0; slot < 10; slot++) {
+    const pFiring = G.pSpells.filter(ps => ps.end === slot);
+    const aFiring = G.aSpells.filter(ps => ps.end === slot);
+    if (!pFiring.length && !aFiring.length) continue;
+
+    log.push({ cls: 'log-slot-header', text: `▶ ${slot+1}번 칸 처리` });
+
+    const pShield = pFiring.some(ps => spell(ps.id).type === 'defense');
+    const aShield = aFiring.some(ps => spell(ps.id).type === 'defense');
+
+    if (pShield) log.push({ cls: 'log-defend', text: '  [플레이어] 쉴드 발동 — 이번 칸 공격 차단' });
+    if (aShield) log.push({ cls: 'log-defend', text: '  [AI] 쉴드 발동 — 이번 칸 공격 차단' });
+
+    // Player spells firing
+    for (const ps of pFiring) {
+      const sp = spell(ps.id);
+      if (sp.type === 'attack') {
+        if (aShield) {
+          log.push({ cls: 'log-blocked', text: `  [플레이어] ${sp.name} → AI 쉴드에 차단됨` });
+        } else {
+          aHP = Math.max(0, aHP - sp.damage);
+          log.push({ cls: 'log-attack', text: `  [플레이어] ${sp.name} → AI에게 ${sp.damage} 피해  (AI HP: ${aHP})` });
+        }
+      } else if (sp.type === 'heal') {
+        const actual = Math.min(sp.hp, MAX_HP - pHP);
+        pHP = Math.min(MAX_HP, pHP + sp.hp);
+        log.push({ cls: 'log-heal', text: `  [플레이어] ${sp.name} → HP +${actual} 회복  (플레이어 HP: ${pHP})` });
+      }
+    }
+
+    // AI spells firing
+    for (const ps of aFiring) {
+      const sp = spell(ps.id);
+      if (sp.type === 'attack') {
+        if (pShield) {
+          log.push({ cls: 'log-blocked', text: `  [AI] ${sp.name} → 플레이어 쉴드에 차단됨` });
+        } else {
+          pHP = Math.max(0, pHP - sp.damage);
+          log.push({ cls: 'log-attack', text: `  [AI] ${sp.name} → 플레이어에게 ${sp.damage} 피해  (플레이어 HP: ${pHP})` });
+        }
+      } else if (sp.type === 'heal') {
+        const actual = Math.min(sp.hp, MAX_HP - aHP);
+        aHP = Math.min(MAX_HP, aHP + sp.hp);
+        log.push({ cls: 'log-heal', text: `  [AI] ${sp.name} → HP +${actual} 회복  (AI HP: ${aHP})` });
+      }
+    }
+
+    if (pHP <= 0 || aHP <= 0) break;
+  }
+
+  G.pHP = pHP;
+  G.aHP = aHP;
+
+  log.push({ cls: 'log-summary', text: `라운드 ${G.round} 종료  |  플레이어 HP: ${pHP}  |  AI HP: ${aHP}` });
+  return log;
+}
+
+// ---- Render ----
+
+function renderHP() {
+  const pPct = (G.pHP / MAX_HP) * 100;
+  const aPct = (G.aHP / MAX_HP) * 100;
+  const barClass = pct => 'hp-bar-inner' + (pct <= 25 ? ' low' : pct <= 55 ? ' mid' : '');
+
+  document.getElementById('p-bar').style.width = pPct + '%';
+  document.getElementById('p-bar').className = barClass(pPct);
+  document.getElementById('p-hp-val').textContent = `HP: ${G.pHP} / ${MAX_HP}`;
+
+  document.getElementById('a-bar').style.width = aPct + '%';
+  document.getElementById('a-bar').className = barClass(aPct);
+  document.getElementById('a-hp-val').textContent = `HP: ${G.aHP} / ${MAX_HP}`;
+
+  document.getElementById('round-num').textContent = G.round;
+  document.getElementById('mana-val').textContent = freeMana();
+
+  const labels = { placement: '배치 중', result: '라운드 종료', gameover: '게임 종료' };
+  document.getElementById('phase-label').textContent = labels[G.phase] || '';
+}
+
+function buildSlotMap(spells) {
+  const map = {};
+  spells.forEach(ps => {
+    const sp = spell(ps.id);
+    for (let i = ps.start; i <= ps.end; i++) {
+      map[i] = { ps, sp, isEnd: i === ps.end, isStart: i === ps.start };
+    }
+  });
+  return map;
+}
+
+function renderTimeline(containerId, spells, reveal, clickable) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  const map = buildSlotMap(spells);
+
+  for (let i = 0; i < 10; i++) {
+    const div = document.createElement('div');
+    div.className = 'slot';
+    div.innerHTML = `<div class="slot-num">${i+1}</div>`;
+
+    if (map[i]) {
+      if (reveal) {
+        const { sp, isEnd, isStart } = map[i];
+        div.classList.add('occupied');
+        if (isEnd) div.classList.add('fire-slot');
+        div.innerHTML += `<div class="slot-name">${sp.name}</div>`;
+        if (isEnd) {
+          let tagText = '발동';
+          let tagCls = sp.type;
+          if (sp.type === 'attack') tagText = `피해 ${sp.damage}`;
+          else if (sp.type === 'heal') tagText = `+${sp.hp} HP`;
+          else if (sp.type === 'defense') tagText = '차단';
+          div.innerHTML += `<div class="slot-tag ${tagCls}">${tagText}</div>`;
+        } else {
+          div.innerHTML += `<div class="slot-tag casting">시전 중</div>`;
+        }
+      } else {
+        div.classList.add('occupied');
+        div.innerHTML += `<div class="slot-name">???</div>`;
+      }
+    } else if (clickable && G.selected) {
+      div.classList.add('selectable');
+      div.addEventListener('click', () => onSlotClick(i));
+    }
+
+    el.appendChild(div);
+  }
+}
+
+function renderCards() {
+  const el = document.getElementById('spell-cards');
+  el.innerHTML = '';
+
+  if (G.phase !== 'placement') {
+    el.innerHTML = '<span style="color:#555;font-size:0.85em">배치 단계가 아닙니다.</span>';
+    return;
+  }
+
+  const fm = freeMana();
+  SPELLS.forEach(sp => {
+    const div = document.createElement('div');
+    const disabled = sp.mana > fm;
+    div.className = 'spell-card' + (disabled ? ' disabled' : '') + (G.selected === sp.id ? ' selected' : '');
+
+    const typeLabel = { attack: '공격', defense: '방어', heal: '회복' }[sp.type];
+    let statLine = '';
+    if (sp.type === 'attack') statLine = `피해 ${sp.damage}`;
+    else if (sp.type === 'heal') statLine = `회복 +${sp.hp} HP`;
+    else statLine = '이번 칸 공격 차단';
+
+    div.innerHTML = `
+      <div class="card-name">${sp.name}</div>
+      <div class="card-stat">${statLine}</div>
+      <div class="card-stat">시전 ${sp.cast}칸</div>
+      <div class="card-mana">마나 ${sp.mana}</div>
+      <div class="card-type">[${typeLabel}]</div>
+    `;
+
+    if (!disabled) div.addEventListener('click', () => onCardClick(sp.id));
+    el.appendChild(div);
+  });
+}
+
+function renderAll() {
+  renderHP();
+  renderTimeline('p-timeline', G.pSpells, true, G.phase === 'placement');
+  renderTimeline('a-timeline', G.aSpells, G.phase !== 'placement', false);
+  renderCards();
+}
+
+// ---- Events ----
+
+function setMsg(text, err = false) {
+  const el = document.getElementById('message');
+  el.textContent = text;
+  el.className = err ? 'err' : '';
+}
+
+function onCardClick(spellId) {
+  if (G.phase !== 'placement') return;
+  if (G.selected === spellId) {
+    G.selected = null;
+    setMsg('선택 해제됨.');
+  } else {
+    G.selected = spellId;
+    const sp = spell(spellId);
+    setMsg(`${sp.name} 선택됨 — 시작할 칸을 클릭하세요 (${sp.cast}칸 사용).`);
+  }
+  renderAll();
+}
+
+function onSlotClick(slotIdx) {
+  if (G.phase !== 'placement' || !G.selected) return;
+  const res = canPlace(G.selected, slotIdx);
+  if (!res.ok) { setMsg(res.msg, true); return; }
+  const sp = spell(G.selected);
+  G.pSpells.push({ id: G.selected, start: slotIdx, end: slotIdx + sp.cast - 1 });
+  G.selected = null;
+  setMsg('배치 완료!');
+  renderAll();
+}
+
+function startBattle() {
+  if (G.phase !== 'placement') return;
+  if (!G.pSpells.length) { setMsg('최소 1개의 마법을 배치해야 합니다.', true); return; }
+
+  G.selected = null;
+  aiDecide();
+  document.getElementById('ai-label').textContent = '공개됨';
+
+  const log = processBattle();
+
+  const logEl = document.getElementById('battle-log');
+  logEl.style.display = 'block';
+  logEl.innerHTML = '';
+  log.forEach(entry => {
+    const d = document.createElement('div');
+    d.className = 'log-line ' + entry.cls;
+    d.textContent = entry.text;
+    logEl.appendChild(d);
+  });
+
+  const pDead = G.pHP <= 0;
+  const aDead = G.aHP <= 0;
+  const roundsDone = G.round >= 3;
+
+  if (pDead || aDead || roundsDone) {
+    G.phase = 'gameover';
+    let result;
+    if (pDead && aDead) result = '동시 사망 — 무승부!';
+    else if (pDead)     result = '패배... AI가 승리했습니다.';
+    else if (aDead)     result = '승리! AI를 쓰러뜨렸습니다.';
+    else if (G.pHP > G.aHP) result = `3라운드 종료 — HP 우세로 승리! (플레이어 ${G.pHP} vs AI ${G.aHP})`;
+    else if (G.aHP > G.pHP) result = `3라운드 종료 — HP 열세로 패배. (플레이어 ${G.pHP} vs AI ${G.aHP})`;
+    else                result = `3라운드 종료 — 무승부! (${G.pHP} vs ${G.aHP})`;
+
+    const d = document.createElement('div');
+    d.className = 'log-line log-result';
+    d.textContent = `★ ${result}`;
+    logEl.appendChild(d);
+
+    document.getElementById('btn-restart').style.display = 'inline-block';
+  } else {
+    G.phase = 'result';
+    document.getElementById('btn-next').style.display = 'inline-block';
+  }
+
+  document.getElementById('btn-battle').disabled = true;
+  document.getElementById('btn-clear').disabled = true;
+
+  renderAll();
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function clearTimeline() {
+  if (G.phase !== 'placement') return;
+  G.pSpells = [];
+  G.selected = null;
+  setMsg('배치 초기화됨.');
+  renderAll();
+}
+
+function nextRound() {
+  G.round++;
+  G.phase = 'placement';
+  G.pSpells = [];
+  G.aSpells = [];
+  G.selected = null;
+
+  document.getElementById('btn-next').style.display = 'none';
+  document.getElementById('btn-battle').disabled = false;
+  document.getElementById('btn-clear').disabled = false;
+  document.getElementById('ai-label').textContent = '전투 시작 전 숨겨짐';
+  document.getElementById('battle-log').style.display = 'none';
+
+  setMsg(`라운드 ${G.round} 시작 — 마법을 배치하세요.`);
+  renderAll();
+}
+
+function restartGame() {
+  init();
+  document.getElementById('btn-restart').style.display = 'none';
+  document.getElementById('btn-next').style.display = 'none';
+  document.getElementById('btn-battle').disabled = false;
+  document.getElementById('btn-clear').disabled = false;
+  document.getElementById('ai-label').textContent = '전투 시작 전 숨겨짐';
+  document.getElementById('battle-log').style.display = 'none';
+
+  setMsg('새 게임 시작 — 마법 카드를 선택하고 타임라인에 배치하세요.');
+  renderAll();
+}
+
+// ---- Start ----
+init();
+renderAll();
+</script>
+</body>
+</html>
